@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container" role="main">
+        <h1 tabindex="0">AI Voice Assistant</h1>
+        
+        <div class="status-container">
+            <div class="status" id="status" tabindex="0" aria-live="polite">
+                Ready to listen...
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startListening" class="primary-button" aria-label="Start listening">
+                <span class="icon">🎤</span>
+                Start Listening
+            </button>
+            
+            <button id="stopListening" class="secondary-button" aria-label="Stop listening" disabled>
+                <span class="icon">⏹️</span>
+                Stop
+            </button>
+        </div>
+
+        <div class="command-list" role="region" aria-label="Available commands">
+            <h2 tabindex="0">Available Commands:</h2>
+            <ul tabindex="0">
+                <li>"Search for [term]"</li>
+                <li>"Go to [website]"</li>
+                <li>"Read this page"</li>
+                <li>"Summarize content"</li>
+                <li>"Switch to tab [number]"</li>
+            </ul>
+        </div>
+
+        <div class="settings">
+            <button id="settingsButton" class="settings-button" aria-label="Open settings">
+                <span class="icon">⚙️</span>
+                Settings
+            </button>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html> 

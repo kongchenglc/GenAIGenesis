@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background circle -->
+    <circle cx="64" cy="64" r="60" fill="#4A90E2"/>
+    
+    <!-- Microphone icon -->
+    <path d="M64 24c-8.837 0-16 7.163-16 16v24c0 8.837 7.163 16 16 16s16-7.163 16-16V40c0-8.837-7.163-16-16-16z" 
+          fill="white"/>
+    
+    <!-- Sound waves -->
+    <path d="M88 64c0 13.255-10.745 24-24 24S40 77.255 40 64" 
+          stroke="white" 
+          stroke-width="6" 
+          fill="none"
+          stroke-linecap="round"/>
+    
+    <path d="M96 64c0 17.673-14.327 32-32 32S32 81.673 32 64" 
+          stroke="white" 
+          stroke-width="6" 
+          fill="none"
+          stroke-linecap="round"/>
+    
+    <!-- Base stand -->
+    <path d="M56 96h16M64 88v8" 
+          stroke="white" 
+          stroke-width="6" 
+          stroke-linecap="round"/>
+</svg> 

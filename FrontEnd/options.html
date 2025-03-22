@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Assistant Settings</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #4A90E2;
+            margin-bottom: 20px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        button {
+            background-color: #4A90E2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #357ABD;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .success {
+            background-color: #DFF0D8;
+            color: #3C763D;
+            display: block;
+        }
+
+        .error {
+            background-color: #F2DEDE;
+            color: #A94442;
+            display: block;
+        }
+
+        .preview {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Voice Assistant Settings</h1>
+
+        <div class="section">
+            <h2>API Configuration</h2>
+            <div class="form-group">
+                <label for="apiKey">OpenAI API Key:</label>
+                <input type="text" id="apiKey" placeholder="Enter your OpenAI API key" />
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Voice Settings</h2>
+            <div class="form-group">
+                <label for="voice">Text-to-Speech Voice:</label>
+                <select id="voice">
+                    <!-- Will be populated with available voices -->
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="rate">Speech Rate:</label>
+                <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1" />
+                <div class="preview">Preview: <span id="rateValue">1</span>x</div>
+            </div>
+
+            <div class="form-group">
+                <label for="pitch">Speech Pitch:</label>
+                <input type="range" id="pitch" min="0.5" max="2" step="0.1" value="1" />
+                <div class="preview">Preview: <span id="pitchValue">1</span>x</div>
+            </div>
+
+            <button id="testVoice">Test Voice Settings</button>
+        </div>
+
+        <div class="section">
+            <h2>Navigation Settings</h2>
+            <div class="form-group">
+                <label for="highlightColor">Focus Highlight Color:</label>
+                <input type="color" id="highlightColor" value="#4A90E2" />
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Keyboard Shortcuts</h2>
+            <div class="form-group">
+                <label>Start/Stop Listening:</label>
+                <div class="preview">Alt + R</div>
+            </div>
+            <div class="form-group">
+                <label>Summarize Current Section:</label>
+                <div class="preview">Alt + S</div>
+            </div>
+        </div>
+
+        <button id="save">Save Settings</button>
+        <div id="status" class="status"></div>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+</html> 

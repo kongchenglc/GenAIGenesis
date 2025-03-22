@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "AI Voice Assistant for Visually Impaired",
+  "version": "1.0",
+  "description": "An AI-powered voice assistant Chrome extension to help blind and visually impaired users navigate the web",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "tabs",
+    "scripting",
+    "tts",
+    "notifications"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon128.svg"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"]
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "128": "icons/icon128.svg"
+  }
+} 
