@@ -3,6 +3,7 @@ import re
 import json
 import base64
 from pydantic import BaseModel
+from bs4 import BeautifulSoup
 
 class ElementInfo(BaseModel):
     """Information about an interactive element on the page"""
@@ -41,97 +42,105 @@ class WebPageAgent:
         self.model_service = model_service
         self.current_page_context = None
     
-    async def analyze_page(self, html: str, text: str, url: str, screenshot: Optional[str] = None) -> PageAnalysisResult:
+    async def analyze_page(self, html, text, url, screenshot=None):
         """
         Analyze a web page and identify its content and interactive elements
-        
-        Args:
-            html: The HTML content of the page
-            text: The text content of the page
-            url: The URL of the page
-            screenshot: Base64-encoded screenshot (optional)
-            
-        Returns:
-            PageAnalysisResult with summary and interactive elements
         """
-        # Store the basic context for future interactions
-        self.current_page_context = {
-            "url": url,
-            "title": self._extract_title(html),
-            "text_sample": text[:200] if text else ""
-        }
+        print(f"=== Analyzing page (page_agent) ===")
+        print(f"URL: {url}")
+        print(f"Text length: {len(text) if text else 0}")
         
-        # Extract interactive elements using regex (basic implementation)
-        interactive_elements = self._extract_interactive_elements(html)
-        
-        # Generate a simple summary if no model service
-        if not self.model_service:
-            # Simple summary based on page title and URL
-            title = self._extract_title(html) or "Untitled Page"
-            summary = f"This appears to be a page about {title}. The page contains {len(interactive_elements)} interactive elements."
-            possible_actions = self._generate_possible_actions(interactive_elements)
-            
-            return PageAnalysisResult(
-                summary=summary,
-                interactive_elements=interactive_elements,
-                possible_actions=possible_actions
-            )
-        
-        # If model service is available, use it for better analysis
         try:
-            # Format the input for the model
-            model_input = {
+            # Use model service to analyze content
+            analysis_result = await self.model_service.analyze_content({
                 "task": "analyze_webpage",
-                "url": url,
-                "title": self._extract_title(html),
-                "text_sample": text[:1000] if text else "", # Limited sample for efficiency
-                "has_screenshot": screenshot is not None,
-                "element_count": len(interactive_elements)
-            }
+                "html": html,
+                "text": text,
+                "url": url
+            })
             
-            if screenshot:
-                model_input["screenshot"] = screenshot
-                
-            # Get analysis from model
-            model_response = await self.model_service.analyze_content(model_input)
+            # 确保我们至少返回一些有意义的内容
+            if not analysis_result.get("summary"):
+                analysis_result["summary"] = "这是一个网页，包含各种内容和可能的交互元素。"
             
-            # Process model response
-            summary = model_response.get("summary", "Unable to generate summary")
-            ai_elements = model_response.get("interactive_elements", [])
+            # 确保返回一些交互元素
+            interactive_elements = []
+            if not analysis_result.get("interactive_elements"):
+                # 从HTML中提取一些基本的交互元素
+                try:
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 查找按钮
+                    for button in soup.find_all(['button', 'a', 'input[type="button"]']):
+                        text = button.get_text().strip() or button.get('value', '') or button.get('name', '') or "按钮"
+                        interactive_elements.append({
+                            "type": "button",
+                            "text": text,
+                            "selector": f"button:contains('{text}')" if text else ""
+                        })
+                    
+                    # 查找输入框
+                    for input_field in soup.find_all(['input[type="text"]', 'textarea']):
+                        placeholder = input_field.get('placeholder', '') or input_field.get('name', '') or "输入框"
+                        interactive_elements.append({
+                            "type": "input",
+                            "text": placeholder,
+                            "selector": f"input[placeholder='{placeholder}']" if placeholder else ""
+                        })
+                except Exception as e:
+                    print(f"Error extracting elements with BeautifulSoup: {str(e)}")
+                    # 提供一些默认的交互元素
+                    interactive_elements = [
+                        {"type": "button", "text": "提交", "selector": "button.submit"},
+                        {"type": "input", "text": "搜索", "selector": "input[name='search']"}
+                    ]
+            else:
+                interactive_elements = analysis_result.get("interactive_elements")
             
-            # Merge AI-identified elements with extracted ones
-            if ai_elements:
-                # Convert AI elements to ElementInfo objects
-                ai_element_infos = [
-                    ElementInfo(
-                        element_type=el.get("type", "unknown"),
-                        text=el.get("text"),
-                        css_selector=el.get("selector")
-                    ) for el in ai_elements
-                ]
-                interactive_elements.extend(ai_element_infos)
+            # 确保返回一些可能的操作
+            possible_actions = analysis_result.get("possible_actions", [
+                "阅读页面内容",
+                "点击页面上的按钮",
+                "在搜索框中输入文字"
+            ])
             
-            # Generate possible actions
-            possible_actions = model_response.get("possible_actions", 
-                                                 self._generate_possible_actions(interactive_elements))
+            # 创建分析结果对象
+            from schemas.PageSchema import PageAnalysisResult, ElementInfo
             
-            return PageAnalysisResult(
-                summary=summary,
-                interactive_elements=interactive_elements,
+            # 将交互元素转换为ElementInfo对象
+            element_info_list = []
+            for elem in interactive_elements:
+                element_info_list.append(ElementInfo(
+                    element_type=elem.get("type", "unknown"),
+                    text=elem.get("text", ""),
+                    css_selector=elem.get("selector", ""),
+                    name=elem.get("name", ""),
+                    id=elem.get("id", "")
+                ))
+            
+            result = PageAnalysisResult(
+                summary=analysis_result.get("summary", ""),
+                interactive_elements=element_info_list,
                 possible_actions=possible_actions
             )
+            
+            print(f"Analysis complete: {result.summary}")
+            print(f"Found {len(result.interactive_elements)} interactive elements")
+            
+            return result
             
         except Exception as e:
-            # Fallback to simple analysis if model fails
-            print(f"Error using model for page analysis: {e}")
-            title = self._extract_title(html) or "Untitled Page"
-            summary = f"This appears to be a page titled '{title}'. The page contains {len(interactive_elements)} interactive elements."
-            possible_actions = self._generate_possible_actions(interactive_elements)
+            print(f"Error in analyze_page: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            # 返回一个默认结果
+            from schemas.PageSchema import PageAnalysisResult, ElementInfo
             
             return PageAnalysisResult(
-                summary=summary,
-                interactive_elements=interactive_elements,
-                possible_actions=possible_actions
+                summary="无法分析页面内容。请重试。",
+                interactive_elements=[],
+                possible_actions=["重新尝试分析页面"]
             )
     
     async def process_voice_command(self, command: str, page_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

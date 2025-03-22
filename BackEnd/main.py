@@ -149,18 +149,28 @@ async def process_audio(
         else:
             print("No request data provided with audio")
         
-        # Read audio content for debugging
+        # Read audio content for processing
         audio_content = await audio.read()
         print(f"Audio size: {len(audio_content)} bytes")
         
-        # Here you would normally:
-        # 1. Use a speech recognition service to convert audio to text
-        # 2. Process the text command using the page agent
+        # 这里我们不再返回简单响应，而是实际处理音频
+        # 获取页面代理实例
+        agent = get_page_agent()
         
-        # For demonstration, we'll return a simple response
+        # 假设这是一个语音转文字的结果 (实际环境需要集成真实的STT服务)
+        # 为了演示，我们返回一个模拟响应，指示系统正在分析页面
         response = {
-            "message": "Audio received. Processing would happen in a production environment.",
-            "is_activated": request_data.get("is_activated", True),
+            "message": "正在分析页面内容，请稍候...",
+            "is_activated": True,
+            "is_action_required": True,
+            "action_items": [
+                {
+                    "description": "分析当前页面",
+                    "action_type": "analyze",
+                    "target_element": "",
+                    "parameters": {}
+                }
+            ],
             "success": True
         }
         

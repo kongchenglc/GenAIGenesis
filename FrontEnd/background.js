@@ -14,84 +14,76 @@ let socket = null;
 // Initialize WebSocket connection
 function initWebSocket() {
   if (socket && socket.readyState === WebSocket.OPEN) {
+    console.log("WebSocket already connected");
     return;
   }
   
-  // The correct WebSocket URL based on the backend implementation
-  // In main.py, the router is included with prefix "/ws" and in websocketUtil.py the route is also "/ws"
-  // So the complete path is /ws/ws
-  const wsUrl = "ws://localhost:8000/ws/ws";
+  console.log("Initializing WebSocket connection");
   
-  try {
-    socket = new WebSocket(wsUrl);
+  // 尝试几个不同的 WebSocket URL
+  const wsUrls = [
+    "ws://localhost:8000/ws/ws",
+    "ws://localhost:8000/ws",
+    "ws://127.0.0.1:8000/ws/ws",
+    "ws://127.0.0.1:8000/ws"
+  ];
+  
+  // 记录当前尝试的索引
+  let currentUrlIndex = 0;
+  
+  function tryConnect() {
+    if (currentUrlIndex >= wsUrls.length) {
+      console.error("Failed to connect to any WebSocket URL");
+      setTimeout(initWebSocket, 5000); // 5秒后重试
+      return;
+    }
     
-    socket.onopen = () => {
-      console.log("WebSocket connection established");
-    };
+    const wsUrl = wsUrls[currentUrlIndex];
+    console.log(`Trying WebSocket URL: ${wsUrl}`);
     
-    socket.onmessage = (event) => {
-      try {
-        const response = JSON.parse(event.data);
-        // Forward the response to active tab content script
-        forwardWebSocketResponse(response);
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    };
-    
-    socket.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      console.log("Trying alternative WebSocket URL");
-      tryAlternativeWebsocket();
-    };
-    
-    socket.onclose = () => {
-      console.log("WebSocket connection closed");
-      // Try to reconnect after 5 seconds
-      setTimeout(initWebSocket, 5000);
-    };
-  } catch (error) {
-    console.error("Error creating WebSocket:", error);
-    tryAlternativeWebsocket();
+    try {
+      socket = new WebSocket(wsUrl);
+      
+      socket.onopen = () => {
+        console.log(`WebSocket connection established to ${wsUrl}`);
+        // 保存成功的URL
+        config.websocketUrl = wsUrl;
+      };
+      
+      socket.onmessage = (event) => {
+        try {
+          console.log(`WebSocket message received: ${event.data}`);
+          const response = JSON.parse(event.data);
+          // Forward the response to active tab content script
+          forwardWebSocketResponse(response);
+        } catch (error) {
+          console.error("Error parsing WebSocket message:", error);
+        }
+      };
+      
+      socket.onerror = (error) => {
+        console.error(`WebSocket error with ${wsUrl}:`, error);
+        currentUrlIndex++;
+        socket.close();
+        tryConnect(); // 尝试下一个URL
+      };
+      
+      socket.onclose = () => {
+        console.log(`WebSocket connection to ${wsUrl} closed`);
+        // 只有当我们已成功连接并稍后断开时才尝试重新连接
+        if (config.websocketUrl === wsUrl) {
+          setTimeout(initWebSocket, 5000);
+        }
+      };
+    } catch (error) {
+      console.error(`Error creating WebSocket with ${wsUrl}:`, error);
+      currentUrlIndex++;
+      tryConnect(); // 尝试下一个URL
+    }
   }
-}
-
-// Try alternative WebSocket URL as fallback
-function tryAlternativeWebsocket() {
-  try {
-    // Try the simpler path without the double /ws/ws
-    const alternativeUrl = "ws://localhost:8000/ws";
-    console.log("Trying alternative WebSocket URL:", alternativeUrl);
-    
-    socket = new WebSocket(alternativeUrl);
-    
-    socket.onopen = () => {
-      console.log("WebSocket connection established with alternative URL");
-      // Update the config to use this URL in the future
-      config.websocketUrl = alternativeUrl;
-    };
-    
-    socket.onmessage = (event) => {
-      try {
-        const response = JSON.parse(event.data);
-        forwardWebSocketResponse(response);
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    };
-    
-    socket.onerror = (error) => {
-      console.error("Alternative WebSocket error:", error);
-    };
-    
-    socket.onclose = () => {
-      console.log("Alternative WebSocket connection closed");
-      // Try to reconnect after 5 seconds
-      setTimeout(initWebSocket, 5000);
-    };
-  } catch (error) {
-    console.error("Error creating alternative WebSocket:", error);
-  }
+  
+  // 开始尝试连接
+  tryConnect();
 }
 
 // Initialize WebSocket when extension loads

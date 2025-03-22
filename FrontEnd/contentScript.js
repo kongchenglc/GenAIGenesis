@@ -643,7 +643,7 @@ class VoiceAssistant {
     try {
       console.log("=== Analyzing page ===");
       console.log(`Current URL: ${window.location.href}`);
-      this.updateFeedbackText("Analyzing page...", true);
+      this.updateFeedbackText("正在分析页面...", true);
       
       // Collect page content according to PageSchema
       const pageContent = {
@@ -656,6 +656,18 @@ class VoiceAssistant {
       
       // Send to background script for analysis
       console.log("Sending page content to background script for analysis");
+      
+      // 确保页面内容不会太大
+      if (pageContent.html.length > 500000) {
+        console.log("HTML content too large, truncating");
+        pageContent.html = pageContent.html.substring(0, 500000);
+      }
+      
+      if (pageContent.text.length > 100000) {
+        console.log("Text content too large, truncating");
+        pageContent.text = pageContent.text.substring(0, 100000);
+      }
+      
       const response = await chrome.runtime.sendMessage({
         type: "ANALYZE_PAGE",
         pageContent: pageContent
@@ -665,28 +677,51 @@ class VoiceAssistant {
       
       if (response.error) {
         console.error(`Error analyzing page: ${response.error}`);
-        throw new Error(response.error);
+        this.speak("无法分析页面，请重试。");
+        this.updateFeedbackText("无法分析页面，请重试。", true);
+        return;
       }
       
       // Process and present analysis results
-      if (response.message) {
-        console.log(`Page analysis message: ${response.message}`);
-        this.speak(response.message);
-        this.updateFeedbackText(response.message, true);
-      }
+      let messageToSpeak = "";
       
       if (response.summary) {
         console.log(`Page summary: ${response.summary}`);
+        messageToSpeak = response.summary;
+      }
+      
+      if (response.possible_actions && response.possible_actions.length > 0) {
+        const actionsText = "可能的操作: " + response.possible_actions.join(", ");
+        console.log(actionsText);
+        messageToSpeak += " " + actionsText;
       }
       
       if (response.interactive_elements && response.interactive_elements.length > 0) {
         console.log(`Found ${response.interactive_elements.length} interactive elements:`, 
           response.interactive_elements);
+        const elementsText = "页面上有 " + response.interactive_elements.length + 
+          " 个交互元素，包括: " + 
+          response.interactive_elements.slice(0, 5).map(e => e.text || e.element_type).join(", ");
+        messageToSpeak += " " + elementsText;
+      }
+      
+      if (messageToSpeak) {
+        this.speak(messageToSpeak);
+        this.updateFeedbackText(messageToSpeak, true);
+      } else if (response.message) {
+        console.log(`Page analysis message: ${response.message}`);
+        this.speak(response.message);
+        this.updateFeedbackText(response.message, true);
+      } else {
+        const defaultMessage = "页面分析完成，但未能提取有用信息。";
+        this.speak(defaultMessage);
+        this.updateFeedbackText(defaultMessage, true);
       }
       
     } catch (error) {
       console.error("Error analyzing page:", error);
-      this.updateFeedbackText("Error analyzing page.", true);
+      this.speak("分析页面时出错，请重试。");
+      this.updateFeedbackText("分析页面时出错，请重试。", true);
     }
   }
 
