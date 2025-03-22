@@ -230,6 +230,39 @@ def display_quick_summary(summary: Dict, links: Dict[str, str]):
     print("\nJust tell me where you'd like to go!")
     return nav_options
 
+def generate_nav_options(links: Dict[str, str]):
+    nav_options = {}  # text -> url mapping
+    
+    for text, url in links.items():
+        # Clean up the text
+        text = text.strip().replace('\n', ' ').replace('  ', ' ')
+        
+        # Skip very short or duplicate-looking links
+        if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
+            continue
+            
+        nav_options[text] = url
+        
+        # Keep list manageable
+        if len(nav_options) >= 7:
+            break
+    
+    return nav_options
+
+def agent_response(summary: Dict, nav_options):
+    text_response = summary['summary'] 
+
+    if nav_options:
+        text_response += f"\nI can take you to any of these sections: {', '.join(nav_options.keys())}."
+
+    else:
+        text_response += "\nJust tell me where you'd like to go!"
+    
+    return text_response, nav_options
+
+
+
+
 def _match_user_intent(user_input: str, available_options: Dict[str, str], model) -> Optional[str]:
     """Use LLM to match user input to available navigation options"""
     # First check if user wants to exit
@@ -250,9 +283,11 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def interactive_session(summarizer: FastWebSummarizer, initial_url: str):
-    """Interactive navigation session with natural language interface"""
+async def temp(summarizer: FastWebSummarizer, initial_url: str):
+    
     current_url = initial_url
+
+    summary, links = await summarizer.quick_summarize(current_url)
     
     try:
         while True:
@@ -297,7 +332,9 @@ async def main():
     summarizer = None
     try:
         summarizer = FastWebSummarizer(api_key=args.api_key)
-        await interactive_session(summarizer, args.url)
+        summary, links = await summarizer.quick_summarize(args.url)
+        nav_options = generate_nav_options(links)
+        text_response, nav_options = agent_response(summary, nav_options)
     except KeyboardInterrupt:
         print("\n\nGot it, stopping now!")
     except Exception as e:
