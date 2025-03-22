@@ -21,12 +21,6 @@ body {
     padding: 16px;
 }
 
-.container {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
 h1 {
     font-size: 24px;
     text-align: center;
@@ -34,22 +28,14 @@ h1 {
     color: var(--primary-color);
 }
 
-.status-container {
-    background-color: #F5F5F5;
-    border-radius: var(--border-radius);
-    padding: 12px;
-}
-
 .status {
     text-align: center;
     font-size: 16px;
     color: var(--text-color);
-}
-
-.controls {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
+    background-color: #F5F5F5;
+    border-radius: var(--border-radius);
+    padding: 12px;
+    margin: 16px 0;
 }
 
 button {
@@ -62,6 +48,8 @@ button {
     align-items: center;
     gap: 8px;
     transition: all var(--transition-speed);
+    background-color: var(--primary-color);
+    color: white;
 }
 
 button:focus {
@@ -69,67 +57,13 @@ button:focus {
     outline-offset: 2px;
 }
 
-.primary-button {
-    background-color: var(--primary-color);
-    color: white;
-}
-
-.primary-button:hover {
+button:hover {
     background-color: #357ABD;
 }
 
-.secondary-button {
-    background-color: var(--secondary-color);
-    color: white;
-}
-
-.secondary-button:hover {
-    background-color: #BD3535;
-}
-
-.secondary-button:disabled {
+button:disabled {
     background-color: #999;
     cursor: not-allowed;
-}
-
-.command-list {
-    background-color: #F5F5F5;
-    border-radius: var(--border-radius);
-    padding: 16px;
-}
-
-.command-list h2 {
-    font-size: 16px;
-    margin-bottom: 8px;
-}
-
-.command-list ul {
-    list-style-type: none;
-    padding-left: 16px;
-}
-
-.command-list li {
-    margin: 8px 0;
-    font-size: 14px;
-}
-
-.settings {
-    display: flex;
-    justify-content: center;
-}
-
-.settings-button {
-    background-color: transparent;
-    color: var(--text-color);
-    border: 1px solid #DDD;
-}
-
-.settings-button:hover {
-    background-color: #F5F5F5;
-}
-
-.icon {
-    font-size: 18px;
 }
 
 /* High contrast mode */
