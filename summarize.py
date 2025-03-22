@@ -63,6 +63,27 @@ class FastWebSummarizer:
             return await asyncio.wait_for(coro, timeout=timeout)
         except (asyncio.TimeoutError, Exception):
             return default
+    
+    async def _extract_specific_info(self, coro: Any, timeout: float, prompt: str, default: Any = None) -> Any:
+        try:
+            # Run Playwright to get fully rendered page text
+            text = await self._safe_extract(coro, timeout, default)
+            cleaned_text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+            context = cleaned_text[:15000]  # Trim for Gemini token limit
+        except Exception as e:
+            return f"Error loading page with Playwright: {e}"
+
+        try:
+            model = genai.GenerativeModel("gemini-pro")
+            response = model.generate_content([
+                f"Webpage content:\n{context}",
+                f"My prompt: {prompt}\n\nBased on the above content, extract and summarize the relevant information."
+            ])
+            return response.text
+        except Exception as e:
+            return f"Error generating Gemini response: {e}"
+
+        
 
     async def _extract_elements(self, selector: str, extract_fn) -> List[Any]:
         """Generic element extraction with error handling"""
@@ -87,6 +108,8 @@ class FastWebSummarizer:
             await self._safe_extract(
                 self.current_page.goto(url, wait_until="domcontentloaded"),
                 PAGE_LOAD_TIMEOUT
+
+
             )
 
             # Get title
@@ -168,6 +191,7 @@ class FastWebSummarizer:
                 main_headings=[],
                 quick_summary=""
             )
+    
 
     def _build_quick_prompt(self, content: QuickPageContent) -> str:
         """Build a minimal prompt for fast processing"""
@@ -263,6 +287,7 @@ def agent_response(summary: Dict, nav_options):
         text_response += "\nJust tell me where you'd like to go!"
     
     return text_response, nav_options
+
 
 
 
