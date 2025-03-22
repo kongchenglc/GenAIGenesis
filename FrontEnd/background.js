@@ -2,6 +2,10 @@
 const OPENAI_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 let API_KEY = ''; // Will be set through settings
 
+// 跟踪当前的权限页面
+let permissionTabId = null;
+let isListening = false;
+
 // Load API key from storage
 chrome.storage.sync.get(['openaiApiKey'], (result) => {
     if (result.openaiApiKey) {
@@ -26,6 +30,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             break;
         case 'switchTab':
             handleTabSwitch(request.tabNumber);
+            break;
+        case 'startListening':
+            // 记录我们正在监听
+            isListening = true;
+            break;
+        case 'stopListening':
+            // 停止监听
+            isListening = false;
+            // 如果权限页面存在，通知它停止监听
+            if (permissionTabId) {
+                chrome.tabs.sendMessage(permissionTabId, { action: 'stopListening' });
+            }
+            break;
+        case 'setPermissionTabId':
+            // 保存权限页面的tabId以便之后通信
+            permissionTabId = sender.tab.id;
+            break;
+        case 'commandRecognized':
+            // 转发语音命令给弹出窗口
+            chrome.runtime.sendMessage({
+                action: 'commandRecognized',
+                command: request.command
+            });
             break;
     }
     return true; // Indicates async response
@@ -160,9 +187,22 @@ async function speakText(text) {
     });
 }
 
+// 监听Tab关闭事件，以便在权限页面关闭时更新状态
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if (tabId === permissionTabId) {
+        permissionTabId = null;
+        // 如果正在监听，通知弹出窗口权限页面已关闭
+        if (isListening) {
+            chrome.runtime.sendMessage({
+                action: 'permissionPageClosed'
+            });
+        }
+    }
+});
+
 // Handle installation and updates
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
         chrome.runtime.openOptionsPage();
     }
-}); 
+});

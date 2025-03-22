@@ -1,47 +1,10 @@
 class VoiceAssistant {
     constructor() {
-        this.recognition = new webkitSpeechRecognition();
         this.synthesis = window.speechSynthesis;
         this.isListening = false;
-        this.setupRecognition();
+        this.permissionPage = null;
         this.initializeElements();
         this.bindEvents();
-    }
-
-    setupRecognition() {
-        this.recognition.continuous = true;
-        this.recognition.interimResults = true;
-        this.recognition.lang = 'en-US';
-
-        this.recognition.onstart = () => {
-            this.updateStatus('Listening...');
-            this.isListening = true;
-            this.updateButtonStates();
-        };
-
-        this.recognition.onend = () => {
-            if (this.isListening) {
-                this.recognition.start();
-            } else {
-                this.updateStatus('Ready to listen...');
-                this.updateButtonStates();
-            }
-        };
-
-        this.recognition.onresult = (event) => {
-            const result = event.results[event.results.length - 1];
-            if (result.isFinal) {
-                const command = result[0].transcript.toLowerCase().trim();
-                this.handleCommand(command);
-            }
-        };
-
-        this.recognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            this.updateStatus('Error: ' + event.error);
-            this.isListening = false;
-            this.updateButtonStates();
-        };
     }
 
     initializeElements() {
@@ -52,25 +15,66 @@ class VoiceAssistant {
     }
 
     bindEvents() {
-        this.startButton.addEventListener('click', () => this.startListening());
+        this.startButton.addEventListener('click', () => this.requestMicrophoneAccess());
         this.stopButton.addEventListener('click', () => this.stopListening());
         this.settingsButton.addEventListener('click', () => this.openSettings());
     }
 
-    startListening() {
-        try {
-            this.recognition.start();
+    requestMicrophoneAccess() {
+        this.updateStatus('Opening microphone permission page...');
+        
+        // 获取扩展ID以构建完整URL
+        const extensionId = chrome.runtime.id;
+        const permissionUrl = `chrome-extension://${extensionId}/permission.html`;
+        
+        // 打开新页面来请求麦克风权限
+        this.permissionPage = window.open(permissionUrl, 'voice_permission', 
+            'width=500,height=400,resizable=yes');
+            
+        // 设置消息监听器以接收来自权限页面的消息
+        window.addEventListener('message', this.handlePermissionMessage.bind(this));
+    }
+
+    handlePermissionMessage(event) {
+        // 确保消息来自我们的权限页面
+        const extensionId = chrome.runtime.id;
+        if (event.origin !== `chrome-extension://${extensionId}`) return;
+
+        if (event.data.type === 'permission_granted') {
+            this.updateStatus('Microphone access granted. Listening...');
             this.isListening = true;
             this.updateButtonStates();
-        } catch (error) {
-            console.error('Error starting recognition:', error);
+            
+            // 通知后台脚本开始监听
+            chrome.runtime.sendMessage({
+                action: 'startListening',
+            });
+        } 
+        else if (event.data.type === 'permission_denied') {
+            this.updateStatus('Microphone access denied. Please try again.');
+            this.isListening = false;
+            this.updateButtonStates();
+        }
+        else if (event.data.type === 'command_recognized') {
+            // 处理来自权限页面的语音命令
+            this.handleCommand(event.data.command);
         }
     }
 
     stopListening() {
         this.isListening = false;
-        this.recognition.stop();
         this.updateButtonStates();
+        this.updateStatus('Stopped listening');
+        
+        // 通知后台脚本停止监听
+        chrome.runtime.sendMessage({
+            action: 'stopListening'
+        });
+        
+        // 关闭权限页面（如果仍然打开）
+        if (this.permissionPage && !this.permissionPage.closed) {
+            this.permissionPage.close();
+        }
     }
 
     updateStatus(message) {
@@ -184,4 +188,4 @@ class VoiceAssistant {
 // Initialize the voice assistant when the popup loads
 document.addEventListener('DOMContentLoaded', () => {
     new VoiceAssistant();
-}); 
+});

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>麦克风权限</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #4A90E2;
+            margin-top: 0;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        .recognition-result {
+            min-height: 100px;
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+            text-align: left;
+        }
+        button {
+            background-color: #4A90E2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #3A80D2;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .close-note {
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>语音助手麦克风权限</h1>
+        <p>此页面需要访问您的麦克风以启用语音识别功能。</p>
+        
+        <div class="status" id="status">等待麦克风访问...</div>
+        
+        <button id="requestPermission">请求麦克风权限</button>
+        <button id="stopListening" disabled>停止监听</button>
+        
+        <div class="recognition-result">
+            <p>识别到的命令将显示在这里：</p>
+            <div id="result"></div>
+        </div>
+        
+        <div class="close-note">
+            <p>您可以在语音命令识别后关闭此窗口，语音助手将继续在扩展中工作。</p>
+        </div>
+    </div>
+    
+    <script src="permission.js"></script>
+</body>
+</html>

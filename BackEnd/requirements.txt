@@ -1,0 +1,18 @@
+# This environment can be created using conda:
+# conda create -n genai python=3.10
+# conda activate genai
+# conda install pytorch torchvision torchaudio -c pytorch
+# conda install -c conda-forge fastapi uvicorn python-multipart numpy soundfile librosa
+# conda install -c huggingface transformers
+# conda install -c conda-forge python-dotenv websockets
+
+fastapi
+uvicorn>=0.27.1
+python-multipart>=0.0.9
+numpy>=1.26.4
+soundfile>=0.12.1
+torch>=2.2.0
+transformers>=4.38.2
+librosa>=0.10.1
+python-dotenv>=1.0.1
+websockets>=12.0 
