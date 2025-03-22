@@ -15,7 +15,8 @@ class VoiceAssistant {
       audioFeedbackEnabled: true,
       spaceKeyEnabled: true, // Enable space key control
       longPressThreshold: 500, // Long press threshold in milliseconds
-      showSpaceKeyHint: true // Show space key hint
+      showSpaceKeyHint: true, // Show space key hint
+      autoAnalyzePages: true // Automatically analyze new pages
     };
 
     // State management
@@ -25,7 +26,11 @@ class VoiceAssistant {
       mediaRecorder: null,
       audioChunks: [],
       spaceKeyDown: false,
-      longPressTimer: null
+      longPressTimer: null,
+      currentNavigationOptions: {}, // Store current navigation options
+      inConversationMode: false, // Track if in conversation mode
+      currentUrl: window.location.href, // Track current URL
+      pageAnalyzed: false // Track if current page has been analyzed
     };
 
     // Initialize UI elements
@@ -33,7 +38,10 @@ class VoiceAssistant {
       assistantContainer: null,
       activationIndicator: null,
       feedbackText: null,
-      spaceKeyHint: null
+      spaceKeyHint: null,
+      dialogContainer: null, // For showing conversation options
+      optionsContainer: null, // For showing navigation options
+      autoSummaryButton: null // Button to toggle auto-summary
     };
 
     // Bindings
@@ -46,6 +54,10 @@ class VoiceAssistant {
     this.speak = this.speak.bind(this);
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
+    this.handleWebSocketMessage = this.handleWebSocketMessage.bind(this);
+    this.processUserCommand = this.processUserCommand.bind(this);
+    this.analyzeCurrentURL = this.analyzeCurrentURL.bind(this);
+    this.toggleAutoSummary = this.toggleAutoSummary.bind(this);
   }
 
   /**
@@ -65,6 +77,14 @@ class VoiceAssistant {
       // Show space key hint if enabled
       if (this.config.showSpaceKeyHint) {
         this.showSpaceKeyHint();
+      }
+      
+      // Automatically analyze page if enabled
+      if (this.config.autoAnalyzePages) {
+        // Small delay to ensure everything is loaded
+        setTimeout(() => {
+          this.analyzeCurrentURL();
+        }, 1000);
       }
       
     } catch (error) {
@@ -131,16 +151,88 @@ class VoiceAssistant {
     spaceKeyHint.innerHTML = 'Hold <kbd>Space</kbd> for voice control';
     spaceKeyHint.style.display = 'none';
     
+    // Create dialog container for conversation
+    const dialogContainer = document.createElement('div');
+    dialogContainer.id = 'voice-assistant-dialog';
+    dialogContainer.style.cssText = `
+      position: fixed;
+      bottom: 90px;
+      right: 90px;
+      width: 320px;
+      max-height: 400px;
+      padding: 15px;
+      background-color: rgba(50, 50, 50, 0.95);
+      color: white;
+      border-radius: 8px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 10000;
+      display: none;
+      overflow-y: auto;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    `;
+    
+    // Create options container
+    const optionsContainer = document.createElement('div');
+    optionsContainer.id = 'voice-assistant-options';
+    optionsContainer.style.cssText = `
+      margin-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+      padding-top: 12px;
+    `;
+    dialogContainer.appendChild(optionsContainer);
+    
+    // Create auto-summary toggle button
+    const autoSummaryButton = document.createElement('button');
+    autoSummaryButton.id = 'voice-assistant-auto-summary';
+    autoSummaryButton.textContent = this.config.autoAnalyzePages ? 'Disable Auto Summary' : 'Enable Auto Summary';
+    autoSummaryButton.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 90px;
+      padding: 5px 10px;
+      background-color: rgba(50, 50, 50, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      cursor: pointer;
+      z-index: 10000;
+    `;
+    autoSummaryButton.addEventListener('click', this.toggleAutoSummary);
+    
     // Add elements to the page
     document.body.appendChild(container);
     document.body.appendChild(feedback);
     document.body.appendChild(spaceKeyHint);
+    document.body.appendChild(dialogContainer);
+    document.body.appendChild(autoSummaryButton);
     
     // Store UI elements
     this.ui.assistantContainer = container;
     this.ui.activationIndicator = indicator;
     this.ui.feedbackText = feedback;
     this.ui.spaceKeyHint = spaceKeyHint;
+    this.ui.dialogContainer = dialogContainer;
+    this.ui.optionsContainer = optionsContainer;
+    this.ui.autoSummaryButton = autoSummaryButton;
+  }
+
+  /**
+   * Toggle auto-summary feature
+   */
+  toggleAutoSummary() {
+    this.config.autoAnalyzePages = !this.config.autoAnalyzePages;
+    this.ui.autoSummaryButton.textContent = this.config.autoAnalyzePages ? 'Disable Auto Summary' : 'Enable Auto Summary';
+    
+    // If enabling and page hasn't been analyzed yet, analyze it now
+    if (this.config.autoAnalyzePages && !this.state.pageAnalyzed) {
+      this.analyzeCurrentURL();
+    }
+    
+    // Save preference to storage
+    chrome.storage.sync.set({ autoAnalyzePages: this.config.autoAnalyzePages });
   }
 
   /**
@@ -176,6 +268,41 @@ class VoiceAssistant {
       document.addEventListener('keydown', this.handleKeyDown);
       document.addEventListener('keyup', this.handleKeyUp);
     }
+    
+    // Listen for messages from background script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === "WEBSOCKET_MESSAGE") {
+        this.handleWebSocketMessage(message.data);
+      }
+      return true;
+    });
+    
+    // Listen for URL changes
+    window.addEventListener('popstate', () => {
+      // Check if the URL has changed
+      if (this.state.currentUrl !== window.location.href) {
+        this.state.currentUrl = window.location.href;
+        this.state.pageAnalyzed = false;
+        
+        // Automatically analyze new page if enabled
+        if (this.config.autoAnalyzePages) {
+          // Small delay to ensure everything is loaded
+          setTimeout(() => {
+            this.analyzeCurrentURL();
+          }, 1000);
+        }
+      }
+    });
+    
+    // Load user preferences
+    chrome.storage.sync.get(['autoAnalyzePages'], (result) => {
+      if (result.hasOwnProperty('autoAnalyzePages')) {
+        this.config.autoAnalyzePages = result.autoAnalyzePages;
+        if (this.ui.autoSummaryButton) {
+          this.ui.autoSummaryButton.textContent = this.config.autoAnalyzePages ? 'Disable Auto Summary' : 'Enable Auto Summary';
+        }
+      }
+    });
   }
 
   /**
@@ -241,8 +368,16 @@ class VoiceAssistant {
     this.ui.assistantContainer.style.width = '80px';
     this.ui.assistantContainer.style.height = '80px';
     this.ui.activationIndicator.classList.add('listening');
-    this.updateFeedbackText("Assistant activated. What can I help you with?", true);
-    this.speak("Assistant activated. What can I help you with?");
+    
+    // Check if we are in conversation mode
+    if (this.state.inConversationMode) {
+      this.updateFeedbackText("What would you like to do with this page?", true);
+      this.speak("What would you like to do with this page?");
+    } else {
+      this.updateFeedbackText("Assistant activated. What can I help you with?", true);
+      this.speak("Assistant activated. What can I help you with?");
+    }
+    
     this.startRecording();
   }
 
@@ -255,8 +390,190 @@ class VoiceAssistant {
     this.ui.activationIndicator.classList.remove('listening');
     this.ui.assistantContainer.style.width = '60px';
     this.ui.assistantContainer.style.height = '60px';
+    
+    // Keep dialog open if in conversation mode
+    if (!this.state.inConversationMode) {
+      this.ui.dialogContainer.style.display = 'none';
+    }
+    
     this.updateFeedbackText("Assistant deactivated. Hold space key or say 'Hey Assistant' to start.");
     this.stopRecording();
+  }
+
+  /**
+   * Handle WebSocket messages from the backend
+   */
+  handleWebSocketMessage(data) {
+    // Process summary and options
+    if (data.summary) {
+      // Show dialog container
+      this.ui.dialogContainer.style.display = 'block';
+      
+      // Display summary
+      const summaryElement = document.createElement('div');
+      summaryElement.className = 'voice-assistant-summary';
+      summaryElement.textContent = data.summary;
+      
+      // Clear existing content and add new summary
+      this.ui.dialogContainer.innerHTML = '';
+      this.ui.dialogContainer.appendChild(summaryElement);
+      
+      // Create options container
+      const optionsContainer = document.createElement('div');
+      optionsContainer.id = 'voice-assistant-options';
+      optionsContainer.style.cssText = `
+        margin-top: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        padding-top: 12px;
+      `;
+      this.ui.dialogContainer.appendChild(optionsContainer);
+      this.ui.optionsContainer = optionsContainer;
+      
+      // Store navigation options
+      if (data.options) {
+        this.state.currentNavigationOptions = data.options;
+        this.displayNavigationOptions(data.options);
+      }
+      
+      // Enter conversation mode
+      this.state.inConversationMode = true;
+      
+      // Mark page as analyzed
+      this.state.pageAnalyzed = true;
+      
+      // Only speak summary if activated or first time visit
+      if (this.state.isActivated) {
+        this.speak(data.summary);
+      }
+    } else if (typeof data === 'string') {
+      // Display simple text response
+      this.updateFeedbackText(data, true);
+      if (this.state.isActivated) {
+        this.speak(data);
+      }
+    }
+  }
+
+  /**
+   * Display navigation options in the dialog
+   */
+  displayNavigationOptions(options) {
+    if (!this.ui.optionsContainer) return;
+    
+    // Clear existing options
+    this.ui.optionsContainer.innerHTML = '';
+    
+    if (Object.keys(options).length === 0) {
+      const noOptions = document.createElement('div');
+      noOptions.textContent = 'No navigation options available.';
+      noOptions.style.fontStyle = 'italic';
+      noOptions.style.opacity = '0.8';
+      this.ui.optionsContainer.appendChild(noOptions);
+      return;
+    }
+    
+    // Create header
+    const header = document.createElement('div');
+    header.textContent = 'You can navigate to:';
+    header.style.marginBottom = '8px';
+    header.style.fontWeight = 'bold';
+    this.ui.optionsContainer.appendChild(header);
+    
+    // Create list
+    const optionsList = document.createElement('ul');
+    optionsList.style.cssText = `
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    `;
+    
+    // Add each option as a button
+    Object.entries(options).forEach(([text, url]) => {
+      const listItem = document.createElement('li');
+      listItem.style.marginBottom = '5px';
+      
+      const button = document.createElement('button');
+      button.textContent = text;
+      button.style.cssText = `
+        background-color: rgba(70, 130, 180, 0.7);
+        border: none;
+        border-radius: 4px;
+        color: white;
+        padding: 6px 10px;
+        text-align: left;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 14px;
+        margin: 2px 0;
+        cursor: pointer;
+        width: 100%;
+      `;
+      
+      button.addEventListener('click', () => {
+        window.location.href = url;
+      });
+      
+      listItem.appendChild(button);
+      optionsList.appendChild(listItem);
+    });
+    
+    this.ui.optionsContainer.appendChild(optionsList);
+    
+    // Add help text
+    const helpText = document.createElement('div');
+    helpText.textContent = 'Or simply say what you would like to know about.';
+    helpText.style.marginTop = '10px';
+    helpText.style.fontStyle = 'italic';
+    this.ui.optionsContainer.appendChild(helpText);
+  }
+
+  /**
+   * Analyze the current URL
+   */
+  analyzeCurrentURL() {
+    // Don't re-analyze if already analyzed
+    if (this.state.pageAnalyzed) return;
+    
+    this.updateFeedbackText("Analyzing page...", true);
+    
+    chrome.runtime.sendMessage(
+      {
+        type: "ANALYZE_URL",
+        url: window.location.href
+      },
+      (response) => {
+        if (response.error) {
+          this.updateFeedbackText(`Error: ${response.error}`, true);
+        }
+      }
+    );
+  }
+
+  /**
+   * Process a user command in conversation mode
+   */
+  processUserCommand(command) {
+    chrome.runtime.sendMessage(
+      {
+        type: "PROCESS_COMMAND",
+        command: command
+      },
+      (response) => {
+        if (response.error) {
+          this.updateFeedbackText(`Sorry, ${response.error}`, true);
+          this.speak(`Sorry, ${response.error}`);
+        } else if (response.type === "URL_COMMAND") {
+          this.updateFeedbackText(response.text, true);
+          this.speak(response.text);
+          // Slight delay before navigation
+          setTimeout(() => {
+            window.location.href = response.url;
+          }, 1500);
+        } else if (response.processing) {
+          this.updateFeedbackText("Processing your request...", true);
+        }
+      }
+    );
   }
 
   /**
@@ -358,7 +675,12 @@ class VoiceAssistant {
       if (response.command) {
         this.handleCommand(response.command);
       } else if (response.transcription) {
-        this.updateFeedbackText(response.transcription, true);
+        // Check if in conversation mode for special handling
+        if (this.state.inConversationMode) {
+          this.processUserCommand(response.transcription);
+        } else {
+          this.updateFeedbackText(response.transcription, true);
+        }
       }
       
       // If still activated, start recording again
@@ -393,6 +715,10 @@ class VoiceAssistant {
         
       case "PAGE_ANALYSIS":
         this.analyzePage();
+        break;
+
+      case "ANALYZE_URL":
+        this.analyzeCurrentURL();
         break;
         
       case "URL_COMMAND":
@@ -481,28 +807,8 @@ class VoiceAssistant {
     try {
       this.updateFeedbackText("Analyzing page...", true);
       
-      // Collect page content
-      const pageContent = {
-        html: document.documentElement.outerHTML,
-        text: document.body.innerText,
-        url: window.location.href
-      };
-      
-      // Send to background script for analysis
-      const response = await chrome.runtime.sendMessage({
-        type: "ANALYZE_PAGE",
-        pageContent: pageContent
-      });
-      
-      if (response.error) {
-        throw new Error(response.error);
-      }
-      
-      // Process and present analysis results
-      if (response.main_content) {
-        this.speak(response.main_content);
-        this.updateFeedbackText(response.main_content, true);
-      }
+      // Call the analyzeCurrentURL method which sends the current URL to the backend
+      this.analyzeCurrentURL();
       
     } catch (error) {
       console.error("Error analyzing page:", error);
@@ -543,3 +849,14 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   const assistant = new VoiceAssistant();
   assistant.init();
 }
+
+// Listen for navigation events (SPA support)
+let lastUrl = location.href;
+new MutationObserver(() => {
+  const url = location.href;
+  if (url !== lastUrl) {
+    lastUrl = url;
+    // Dispatch a custom event that our assistant can listen for
+    window.dispatchEvent(new CustomEvent('locationchange', { detail: url }));
+  }
+}).observe(document, { subtree: true, childList: true });
