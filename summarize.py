@@ -197,39 +197,6 @@ Provide a 1-2 sentence summary focused on the specific content of this page."""
         if self.browser:
             await self.browser.close()
 
-def _group_navigation_options(links: Dict[str, str]) -> Dict[str, List[Tuple[str, str]]]:
-    """Group navigation options into categories for better organization"""
-    # General categories that work across different types of websites
-    categories = {
-        "Main": ["home", "main", "index", "about", "welcome"],
-        "Info": ["about", "info", "learn", "overview", "details", "description"],
-        "Features": ["features", "services", "products", "offerings", "solutions"],
-        "Resources": ["resources", "docs", "documentation", "guides", "blog", "news", "articles"],
-        "User": ["sign", "login", "account", "profile", "register", "settings", "preferences"],
-        "Support": ["help", "support", "faq", "contact", "feedback"]
-    }
-    
-    grouped = {cat: [] for cat in categories}
-    other = []
-    
-    for text, url in links.items():
-        text_lower = text.lower()
-        categorized = False
-        for cat, keywords in categories.items():
-            if any(keyword in text_lower for keyword in keywords):
-                grouped[cat].append((text, url))
-                categorized = True
-                break
-        if not categorized:
-            other.append((text, url))
-    
-    # Clean up empty categories and sort items within each category
-    # Only show Other if it has items and we have less than 3 main categories
-    result = {k: sorted(v) for k, v in grouped.items() if v}
-    if other and len(result) < 3:
-        result["More"] = other[:5]  # Limit other items to top 5
-    
-    return result
 
 def display_quick_summary(summary: Dict, links: Dict[str, str]):
     """Display a conversational summary and navigation options"""
