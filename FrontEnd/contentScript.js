@@ -530,9 +530,9 @@ class VoiceAssistant {
   /**
    * Analyze the current URL
    */
-  analyzeCurrentURL() {
-    // Don't re-analyze if already analyzed
-    if (this.state.pageAnalyzed) return;
+  analyzeCurrentURL(retry = false) {
+    // Don't re-analyze if already analyzed and不是重试
+    if (this.state.pageAnalyzed && !retry) return;
     
     this.updateFeedbackText("Analyzing page...", true);
     
@@ -542,8 +542,16 @@ class VoiceAssistant {
         url: window.location.href
       },
       (response) => {
-        if (response.error) {
+        if (response && response.error) {
           this.updateFeedbackText(`Error: ${response.error}`, true);
+          
+          // 如果需要重试
+          if (response.retry) {
+            // 延迟2秒后重试
+            setTimeout(() => {
+              this.analyzeCurrentURL(true);
+            }, 2000);
+          }
         }
       }
     );
