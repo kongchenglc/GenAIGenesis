@@ -9,7 +9,8 @@
     "tabs",
     "scripting",
     "tts",
-    "notifications"
+    "notifications",
+    "background"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -1,181 +1,159 @@
-// Content script for handling webpage interactions
+let recognition = null;
+let voiceOverlay = null;
 
-// Track the current focus element
-let currentFocusElement = null;
+// 创建悬浮窗
+function createVoiceOverlay() {
+    voiceOverlay = document.createElement('div');
+    voiceOverlay.id = 'voice-control-overlay';
+    voiceOverlay.innerHTML = `
+        <div class="voice-status">
+            <div class="voice-indicator"></div>
+            <span class="status-text">正在听取命令...</span>
+        </div>
+    `;
+    document.body.appendChild(voiceOverlay);
 
-// Initialize the content script
-function initialize() {
-    setupKeyboardNavigation();
-    setupFocusTracking();
-    setupAccessibilityEnhancements();
+    // 添加样式
+    const style = document.createElement('style');
+    style.textContent = `
+        #voice-control-overlay {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            z-index: 999999;
+            font-family: Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            transition: opacity 0.3s;
+        }
+        .voice-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .voice-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4CAF50;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .status-text {
+            font-size: 14px;
+        }
+    `;
+    document.head.appendChild(style);
 }
 
-// Setup keyboard navigation
-function setupKeyboardNavigation() {
-    document.addEventListener('keydown', (event) => {
-        // Alt + R to start reading from current position
-        if (event.altKey && event.key === 'r') {
-            event.preventDefault();
-            readFromCurrentPosition();
-        }
-        
-        // Alt + S to summarize the current section
-        if (event.altKey && event.key === 's') {
-            event.preventDefault();
-            summarizeCurrentSection();
-        }
-    });
-}
-
-// Setup focus tracking
-function setupFocusTracking() {
-    document.addEventListener('focusin', (event) => {
-        currentFocusElement = event.target;
-        highlightFocusedElement(event.target);
-    });
-
-    document.addEventListener('focusout', (event) => {
-        removeHighlight(event.target);
-    });
-}
-
-// Enhance accessibility of the page
-function setupAccessibilityEnhancements() {
-    // Add ARIA labels to unlabeled buttons and links
-    const elements = document.querySelectorAll('button, a');
-    elements.forEach(element => {
-        if (!element.getAttribute('aria-label') && !element.textContent.trim()) {
-            const possibleLabel = findPossibleLabel(element);
-            if (possibleLabel) {
-                element.setAttribute('aria-label', possibleLabel);
-            }
-        }
-    });
-
-    // Add role attributes to ambiguous elements
-    const divButtons = document.querySelectorAll('div[onclick]');
-    divButtons.forEach(div => {
-        if (!div.getAttribute('role')) {
-            div.setAttribute('role', 'button');
-        }
-    });
-}
-
-// Helper function to find possible labels for elements
-function findPossibleLabel(element) {
-    // Check for images
-    const img = element.querySelector('img');
-    if (img && img.alt) {
-        return img.alt;
-    }
-
-    // Check for icon fonts
-    const icon = element.querySelector('i[class*="icon"], span[class*="icon"]');
-    if (icon) {
-        const className = icon.className;
-        const matches = className.match(/icon-(\w+)/);
-        if (matches) {
-            return matches[1].replace('-', ' ');
+// 更新状态显示
+function updateStatus(message) {
+    if (voiceOverlay) {
+        const statusText = voiceOverlay.querySelector('.status-text');
+        if (statusText) {
+            statusText.textContent = message;
         }
     }
+}
 
-    // Check for nearby text
-    const next = element.nextElementSibling;
-    if (next && next.textContent.trim()) {
-        return next.textContent.trim();
+// 初始化语音识别
+function initVoiceRecognition() {
+    if (!('webkitSpeechRecognition' in window)) {
+        console.error('Speech recognition not supported');
+        return;
     }
 
-    return null;
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'zh-CN';
+
+    recognition.onstart = () => {
+        console.log('Voice recognition started');
+        updateStatus('正在听取命令...');
+    };
+
+    recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+            .map(result => result[0].transcript)
+            .join('');
+
+        handleVoiceCommand(transcript.toLowerCase());
+    };
+
+    recognition.onerror = (event) => {
+        console.error('Recognition error:', event.error);
+        updateStatus('语音识别出错，正在重新启动...');
+        setTimeout(() => {
+            startVoiceRecognition();
+        }, 1000);
+    };
+
+    recognition.onend = () => {
+        console.log('Voice recognition ended');
+        recognition.start();
+    };
 }
 
-// Highlight the focused element
-function highlightFocusedElement(element) {
-    element.style.outline = '2px solid #4A90E2';
-    element.style.outlineOffset = '2px';
-}
+// 处理语音命令
+function handleVoiceCommand(command) {
+    console.log('Received command:', command);
+    updateStatus(`收到命令: ${command}`);
 
-// Remove highlight from element
-function removeHighlight(element) {
-    element.style.outline = '';
-    element.style.outlineOffset = '';
-}
+    if (command.includes('打开') || command.includes('访问')) {
+        let url = '';
+        if (command.includes('百度')) {
+            url = 'https://www.baidu.com';
+        } else if (command.includes('谷歌')) {
+            url = 'https://www.google.com';
+        } else if (command.includes('必应')) {
+            url = 'https://www.bing.com';
+        }
 
-// Read content from current position
-function readFromCurrentPosition() {
-    let textToRead = '';
-    
-    if (currentFocusElement) {
-        // If we have a focused element, start reading from there
-        textToRead = extractReadableContent(currentFocusElement);
-    } else {
-        // Otherwise, try to find the main content
-        const mainContent = document.querySelector('main, article, [role="main"]') || document.body;
-        textToRead = extractReadableContent(mainContent);
-    }
-
-    // Send message to background script to read the text
-    chrome.runtime.sendMessage({
-        action: 'readText',
-        text: textToRead
-    });
-}
-
-// Summarize current section
-function summarizeCurrentSection() {
-    let sectionToSummarize = '';
-    
-    if (currentFocusElement) {
-        // Find the closest section-like container
-        const section = currentFocusElement.closest('section, article, .section, [role="region"]');
-        if (section) {
-            sectionToSummarize = extractReadableContent(section);
-        } else {
-            sectionToSummarize = extractReadableContent(currentFocusElement);
+        if (url) {
+            chrome.runtime.sendMessage({ 
+                type: 'OPEN_URL', 
+                url: url 
+            });
+            updateStatus(`正在打开 ${url}`);
         }
     }
-
-    // Send message to background script to summarize the text
-    chrome.runtime.sendMessage({
-        action: 'summarize',
-        text: sectionToSummarize
-    });
 }
 
-// Extract readable content from an element
-function extractReadableContent(element) {
-    // Clone the element to avoid modifying the actual page
-    const clone = element.cloneNode(true);
-    
-    // Remove hidden elements
-    const hiddenElements = clone.querySelectorAll('[aria-hidden="true"], [hidden], script, style');
-    hiddenElements.forEach(el => el.remove());
-    
-    // Get text content
-    return clone.innerText
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-// Listen for messages from the background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    switch (request.action) {
-        case 'getPageContent':
-            sendResponse({ content: extractReadableContent(document.body) });
-            break;
-        case 'focusElement':
-            const element = document.querySelector(request.selector);
-            if (element) {
-                element.focus();
-                highlightFocusedElement(element);
-            }
-            break;
+// 启动语音识别
+function startVoiceRecognition() {
+    if (!recognition) {
+        initVoiceRecognition();
     }
-    return true;
-});
+    try {
+        recognition.start();
+    } catch (e) {
+        console.error('Recognition start error:', e);
+    }
+}
 
-// Initialize when the page loads
+// 请求麦克风权限并初始化
+async function initialize() {
+    try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        createVoiceOverlay();
+        startVoiceRecognition();
+    } catch (error) {
+        console.error('Microphone permission denied:', error);
+    }
+}
+
+// 当页面加载完成后初始化
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initialize);
 } else {
     initialize();
-} 
+}
