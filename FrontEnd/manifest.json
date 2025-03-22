@@ -32,18 +32,12 @@
     "16": "icons/icon16.png",
     "128": "icons/icon128.svg"
   },
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "permission.html",
-        "permission.js"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ],
   "host_permissions": [
-    "https://*/*"
+    "https://*/*",
+    "wss://*/*",
+    "http://localhost:*/*",
+    "ws://localhost:*/*",
+    "https://localhost:*/*",
+    "wss://localhost:*/*"
   ]
 }

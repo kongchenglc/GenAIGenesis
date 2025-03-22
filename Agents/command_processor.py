@@ -9,21 +9,21 @@ class CommandProcessor:
         
     async def process_command(self, text: str, is_activated: bool) -> Optional[Dict[str, Any]]:
         try:
-            # 检查唤醒词
+            # Check wake word
             if not is_activated and self.wake_word in text:
                 return {
                     "type": "WAKE_WORD_DETECTED"
                 }
             
-            # 检查停止词
+            # Check stop word
             if is_activated and self.stop_word in text:
                 return {
                     "type": "STOP_WORD_DETECTED"
                 }
             
-            # 如果已激活，处理其他命令
+            # If activated, process other commands
             if is_activated:
-                # 处理URL命令
+                # Process URL commands
                 url_match = self.url_pattern.search(text)
                 if url_match:
                     domain = url_match.group(1)
@@ -32,7 +32,7 @@ class CommandProcessor:
                         "url": f"https://{domain}"
                     }
                 
-                # 处理其他命令
+                # Process other general commands
                 if text:
                     return {
                         "type": "GENERAL_COMMAND",

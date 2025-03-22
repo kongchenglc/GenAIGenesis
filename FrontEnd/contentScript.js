@@ -4,8 +4,9 @@ voiceOverlay.id = 'voice-control-overlay';
 voiceOverlay.innerHTML = `
       <div class="voice-status">
           <div class="voice-indicator"></div>
-          <span class="status-text">长按空格键开始语音助手</span>
+          <span class="status-text">Hold space key to start talk</span>
       </div>
+      <div id="recognition-result" class="recognition-result"></div>
   `;
 document.body.appendChild(voiceOverlay);
 
@@ -25,8 +26,10 @@ if (!document.getElementById('voice-control-style')) {
               z-index: 999999;
               font-family: Arial, sans-serif;
               display: flex;
-              align-items: center;
+              flex-direction: column;
+              align-items: flex-start;
               transition: opacity 0.3s;
+              max-width: 350px;
           }
           .voice-status {
               display: flex;
@@ -37,7 +40,7 @@ if (!document.getElementById('voice-control-style')) {
               width: 10px;
               height: 10px;
               border-radius: 50%;
-              background: #f0ad4e; /* 黄色表示待命状态 */
+              background: #f0ad4e; /* Yellow indicates standby status */
               animation: pulse 1.5s infinite;
           }
           @keyframes pulse {
@@ -48,26 +51,55 @@ if (!document.getElementById('voice-control-style')) {
           .status-text {
               font-size: 14px;
           }
+          .recognition-result {
+              margin-top: 10px;
+              font-size: 14px;
+              width: 100%;
+              word-wrap: break-word;
+          }
+          .recognition-result a {
+              color: #4CAF50;
+              text-decoration: underline;
+          }
+          .recognition-result a:hover {
+              color: #81C784;
+          }
+          .recognition-result ol {
+              margin: 5px 0;
+              padding-left: 20px;
+          }
+          .recognition-result li {
+              margin-bottom: 3px;
+          }
       `;
     document.head.appendChild(style);
 }
 
-// 长按空格键检测相关变量
+// Long press space key detection variables
 let spaceKeyDown = false;
 let longPressTimer = null;
-const LONG_PRESS_DURATION = 500; // 长按500ms触发
+const LONG_PRESS_DURATION = 500; // 500ms to trigger long press
 let permissionRequested = false;
 
-// 请求麦克风权限的函数
+// Recording related variables
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let recordingInterval = null;
+let socket = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 5;
+
+// Request microphone permission function
 async function requestMicrophonePermission() {
     if (permissionRequested) return;
     
     try {
-        // 更新UI状态
-        document.querySelector('.status-text').textContent = '正在请求麦克风权限...';
-        document.querySelector('.voice-indicator').style.background = '#f0ad4e'; // 黄色表示处理中
+        // Update UI status
+        updateStatusText('Requesting microphone permission...');
+        updateIndicatorColor('#f0ad4e'); // Yellow indicates processing
         
-        // 使用带有降噪和回声消除的约束
+        // Use constraints with noise suppression and echo cancellation
         const constraints = {
             audio: {
                 echoCancellation: true,
@@ -77,78 +109,386 @@ async function requestMicrophonePermission() {
             video: false
         };
         
-        // 尝试请求麦克风权限
+        // Try to request microphone permission
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         permissionRequested = true;
 
-        // 如果权限被授予，更新overlay状态
-        console.log('麦克风权限已授予');
-        document.querySelector('.status-text').textContent = '麦克风权限已授权，开始录音...';
-        document.querySelector('.voice-indicator').style.background = '#4CAF50'; // 绿色表示成功
+        // If permission is granted, update overlay status
+        console.log('Microphone permission granted');
+        updateStatusText('Microphone permission granted, starting recording...');
+        updateIndicatorColor('#4CAF50'); // Green indicates success
 
-        // 通知background.js权限已授予
+        // Notify background.js that permission is granted
         chrome.runtime.sendMessage({ type: 'PERMISSION_GRANTED' });
-
-        // 语音识别逻辑可以直接在这里实现，或通过消息传递给permission.js处理
+        
+        // Return stream to start recording
         return stream;
     } catch (error) {
-        // 请求失败，更新overlay状态
-        console.error('麦克风权限被拒绝:', error);
-        document.querySelector('.status-text').textContent = '麦克风权限被拒绝，请重试';
-        document.querySelector('.voice-indicator').style.background = '#F44336'; // 红色表示失败
+        // Update overlay status if request fails
+        console.error('Microphone permission denied:', error);
+        updateStatusText('Microphone permission denied, please try again');
+        updateIndicatorColor('#F44336'); // Red indicates failure
         permissionRequested = false;
 
-        // 通知background.js权限被拒绝
+        // Notify background.js that permission is denied
         chrome.runtime.sendMessage({ type: 'PERMISSION_DENIED' });
 
-        // 根据错误类型显示不同的消息
+        // Display different messages based on error type
         if (error.name === 'NotAllowedError') {
-            console.log('用户拒绝了麦克风权限');
+            console.log('User denied microphone permission');
         } else if (error.name === 'NotFoundError') {
-            console.log('未找到麦克风设备');
-            document.querySelector('.status-text').textContent = '未找到麦克风设备';
+            console.log('No microphone device found');
+            updateStatusText('No microphone device found');
         } else {
-            console.log('权限错误:', error);
+            console.log('Permission error:', error);
         }
         
         return null;
     }
 }
 
-// 打开 permission.html 页面请求权限
-function openPermissionPage() {
-    // 使用chrome.runtime.getURL获取permission.html的完整URL
-    const permissionUrl = chrome.runtime.getURL('permission.html');
-    // 通知background.js打开权限页面
-    chrome.runtime.sendMessage({ 
-        type: 'OPEN_PERMISSION_PAGE', 
-        url: permissionUrl 
-    });
+// Ensure backend connection before establishing WebSocket
+async function ensureCertificateAccepted() {
+    try {
+        updateStatusText('Checking backend connection...');
+        
+        // Print current domain to help debug cross-origin issues
+        const currentDomain = window.location.href;
+        console.log('Current page domain:', currentDomain);
+        
+        // Try to connect to the backend via HTTP
+        console.log('Attempting to connect to backend HTTP service...');
+        const response = await fetch('http://localhost:8000/', {
+            // Add cross-origin headers
+            mode: 'cors',
+        });
+        
+        if (response.ok) {
+            console.log('HTTP connection successful');
+            return true;
+        } else {
+            console.warn('HTTP connection status not OK:', response.status, response.statusText);
+            return false;
+        }
+    } catch (error) {
+        console.error('HTTP connection failed, detailed error:', error);
+        
+        // More detailed error message
+        const resultDiv = document.getElementById('recognition-result');
+        resultDiv.innerHTML = `
+            <div>Error: Cannot connect to backend server</div>
+            <div>Current page: ${window.location.href}</div>
+            <div>Error message: ${error.message}</div>
+            <div>Possible causes:</div>
+            <ol>
+                <li>Backend server not running: Ensure python main.py is executing</li>
+                <li>Backend server might be using HTTPS instead of HTTP: Please modify backend code to use HTTP</li>
+                <li>Permission issue: Check if manifest.json has appropriate permissions</li>
+                <li>Cross-origin issue: You're currently on ${window.location.origin} domain trying to access localhost</li>
+                <li>Port in use: Ensure port 8000 is not being used by another program</li>
+            </ol>
+        `;
+        
+        return false;
+    }
 }
 
-// 处理空格键按下
+// Initialize WebSocket connection
+async function initializeWebSocket() {
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+    
+    try {
+        updateStatusText('Connecting to server...');
+        
+        // Ensure connection is available
+        const connectionOk = await ensureCertificateAccepted();
+        if (!connectionOk) {
+            updateStatusText('Cannot connect to backend server');
+            updateIndicatorColor('#F44336'); // Red indicates error
+            return;
+        }
+        
+        // WebSocket URL using ws instead of wss (HTTP instead of HTTPS)
+        const wsUrl = 'ws://localhost:8000/ws';
+        console.log('Attempting to connect to WebSocket server:', wsUrl);
+        
+        socket = new WebSocket(wsUrl);
+        
+        socket.onopen = () => {
+            console.log('WebSocket connection established');
+            // Send initialization message
+            socket.send(JSON.stringify({
+                type: 'init',
+                client: 'chrome-extension'
+            }));
+            reconnectAttempts = 0;
+            
+            if (!isRecording) {
+                updateStatusText('Connected, hold space key to start talk');
+            } else {
+                updateStatusText('Recording...');
+            }
+        };
+        
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Received WebSocket message:', data);
+                
+                if (data.command) {
+                    displayRecognitionResult({ command: data.command });
+                } else if (data.error) {
+                    console.error('WebSocket error:', data.error);
+                    displayRecognitionResult({ error: data.message || data.error });
+                }
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        };
+        
+        socket.onclose = (event) => {
+            console.log(`WebSocket connection closed: code=${event.code} reason=${event.reason}`);
+            
+            if (!isRecording) {
+                updateStatusText('Server connection lost');
+            }
+            
+            // Try to reconnect if not normal closure
+            if (event.code !== 1000 && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                console.log(`Attempting to reconnect (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                updateStatusText(`Reconnecting (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                setTimeout(initializeWebSocket, 2000);
+            } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                updateStatusText('Cannot connect to server, please check if backend is running');
+                updateIndicatorColor('#F44336'); // Red indicates connection failure
+                
+                const resultDiv = document.getElementById('recognition-result');
+                resultDiv.innerHTML = `
+                    <div>Error: WebSocket connection failed.</div>
+                    <div>Please ensure:</div>
+                    <ol>
+                        <li>Backend server is running (python main.py)</li>
+                        <li>Backend server uses HTTP instead of HTTPS (correctly configured as ws://)</li>
+                        <li>Chrome extension has microphone access permission</li>
+                    </ol>
+                `;
+            }
+        };
+        
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            updateStatusText('Connection error, please ensure backend server is running');
+            updateIndicatorColor('#F44336'); // Red indicates error
+            
+            const resultDiv = document.getElementById('recognition-result');
+            resultDiv.innerHTML = `
+                <div>Error: WebSocket connection failed.</div>
+                <div>Please ensure:</div>
+                <ol>
+                    <li>Backend server is running (python main.py)</li>
+                    <li>Backend server uses HTTP instead of HTTPS (correctly configured as ws://)</li>
+                    <li>Chrome extension has microphone access permission</li>
+                </ol>
+            `;
+        };
+    } catch (error) {
+        console.error('Failed to initialize WebSocket:', error);
+        updateStatusText('Connection failed, please try again');
+        updateIndicatorColor('#F44336'); // Red indicates error
+    }
+}
+
+// Update status text
+function updateStatusText(text) {
+    const statusTextElement = document.querySelector('.status-text');
+    if (statusTextElement) {
+        statusTextElement.textContent = text;
+    }
+}
+
+// Update indicator color
+function updateIndicatorColor(color) {
+    const indicatorElement = document.querySelector('.voice-indicator');
+    if (indicatorElement) {
+        indicatorElement.style.background = color;
+    }
+}
+
+// Start recording
+async function startRecording(stream) {
+    if (isRecording) return;
+    
+    try {
+        // Initialize WebSocket connection
+        await initializeWebSocket();
+        
+        // Cancel recording if WebSocket connection failed
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            updateStatusText('Cannot connect to server, recording canceled');
+            updateIndicatorColor('#F44336'); // Red indicates error
+            return;
+        }
+        
+        audioChunks = [];
+        isRecording = true;
+        
+        // Create MediaRecorder instance
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm',
+        });
+        
+        // Set handler for when data is available
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+        
+        // Set handler for when recording stops
+        mediaRecorder.onstop = () => {
+            if (audioChunks.length > 0) {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                sendAudioToBackend(audioBlob);
+                audioChunks = [];
+            }
+        };
+        
+        // Start recording
+        mediaRecorder.start();
+        
+        // Stop and restart recording periodically to send data
+        recordingInterval = setInterval(() => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                mediaRecorder.start();
+            }
+        }, 2000); // Send data every 2 seconds
+        
+        updateStatusText('Recording...');
+        updateIndicatorColor('#4CAF50'); // Green indicates recording
+        console.log('Recording started');
+    } catch (error) {
+        console.error('Failed to start recording:', error);
+        updateStatusText('Recording failed, please try again');
+        updateIndicatorColor('#F44336'); // Red indicates error
+        isRecording = false;
+    }
+}
+
+// Stop recording
+function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    
+    try {
+        // Clear timer
+        if (recordingInterval) {
+            clearInterval(recordingInterval);
+            recordingInterval = null;
+        }
+        
+        // Stop recording
+        if (mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        
+        isRecording = false;
+        updateStatusText('Recording stopped');
+        updateIndicatorColor('#f0ad4e'); // Yellow indicates standby
+        console.log('Recording stopped');
+    } catch (error) {
+        console.error('Failed to stop recording:', error);
+        updateStatusText('Failed to stop recording');
+        updateIndicatorColor('#F44336'); // Red indicates error
+    }
+}
+
+// Send audio to backend
+async function sendAudioToBackend(audioBlob) {
+    try {
+        console.log('Preparing to send audio data...');
+        
+        // Check WebSocket connection
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket not connected, attempting to reconnect...');
+            await initializeWebSocket();
+            
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                const resultDiv = document.getElementById('recognition-result');
+                resultDiv.textContent = 'Error: WebSocket not connected, cannot send audio data';
+                return;
+            }
+        }
+        
+        // Convert Blob to Base64
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64data = reader.result.split(',')[1];
+            
+            // Send audio data
+            socket.send(JSON.stringify({
+                type: 'audio_data',
+                data: base64data
+            }));
+            
+            console.log('Audio data sent');
+        };
+        
+        reader.readAsDataURL(audioBlob);
+    } catch (error) {
+        console.error('Failed to prepare audio data:', error);
+        const resultDiv = document.getElementById('recognition-result');
+        resultDiv.textContent = `Error: ${error.message}`;
+    }
+}
+
+// Display recognition results
+function displayRecognitionResult(data) {
+    const resultDiv = document.getElementById('recognition-result');
+    
+    if (data.command) {
+        if (data.command.type === 'GENERAL_COMMAND') {
+            resultDiv.textContent = `Recognition result: ${data.command.text}`;
+        } else if (data.command.type === 'URL_COMMAND') {
+            resultDiv.textContent = `Recognition result: Open website ${data.command.url}`;
+        } else if (data.command.type === 'WAKE_WORD_DETECTED') {
+            resultDiv.textContent = `Recognition result: Wake word detected`;
+        } else if (data.command.type === 'STOP_WORD_DETECTED') {
+            resultDiv.textContent = `Recognition result: Stop word detected`;
+        } else if (data.command.originalText) {
+            resultDiv.textContent = `Recognition result: ${data.command.originalText}`;
+        } else {
+            resultDiv.textContent = `Recognition result: ${JSON.stringify(data.command)}`;
+        }
+    } else if (data.error) {
+        resultDiv.textContent = `Error: ${data.error}`;
+    } else {
+        resultDiv.textContent = 'No recognition result';
+    }
+}
+
+// Handle space key press
 function handleSpaceKeyDown() {
     if (longPressTimer === null) {
         spaceKeyDown = true;
         longPressTimer = setTimeout(async () => {
-            // 长按超过阈值，请求麦克风权限
-            console.log('空格键长按，请求麦克风权限');
-            document.querySelector('.status-text').textContent = '正在启动语音助手...';
+            // Request microphone permission when long press exceeds threshold
+            console.log('Space key held, requesting microphone permission');
+            updateStatusText('Launching voice assistant...');
             
             const stream = await requestMicrophonePermission();
             if (stream) {
-                // 权限已获取，可以在这里处理录音逻辑
-                // 或者发送消息到background.js通知permission.js处理
-                chrome.runtime.sendMessage({ 
-                    type: 'START_VOICE_RECOGNITION'
-                });
+                // Start recording
+                await startRecording(stream);
             }
             
         }, LONG_PRESS_DURATION);
     }
 }
 
-// 处理空格键释放
+// Handle space key release
 function handleSpaceKeyUp() {
     if (spaceKeyDown) {
         spaceKeyDown = false;
@@ -156,21 +496,25 @@ function handleSpaceKeyUp() {
             clearTimeout(longPressTimer);
             longPressTimer = null;
             
-            // 如果已经获得权限，但长按未到达阈值，则恢复待命状态
-            if (!permissionRequested) {
-                document.querySelector('.status-text').textContent = '长按空格键开始语音助手';
-                document.querySelector('.voice-indicator').style.background = '#f0ad4e';
+            // Stop recording if recording is in progress
+            if (isRecording) {
+                stopRecording();
+            }
+            // Restore standby status if permission not requested or recording not started
+            else if (!permissionRequested) {
+                updateStatusText('Hold space key to start talk');
+                updateIndicatorColor('#f0ad4e'); // Yellow indicates standby
             }
         }
     }
 }
 
-// 添加键盘事件监听器
+// Add keyboard event listeners
 document.addEventListener('keydown', (event) => {
-    // 仅在按下空格键且不在输入框中时触发
+    // Trigger only when space key is pressed and not in input field
     if (event.code === 'Space' && 
         !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
-        // 阻止默认行为（页面滚动等）
+        // Prevent default behavior (page scrolling etc.)
         event.preventDefault();
         handleSpaceKeyDown();
     }
@@ -182,13 +526,113 @@ document.addEventListener('keyup', (event) => {
     }
 });
 
-// 监听来自background.js的消息
-chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'OPEN_PERMISSION_REQUEST') {
-        // 当用户点击扩展图标时，也可以请求权限
-        requestMicrophonePermission();
-    } else if (message.type === 'SHOW_PERMISSION_PAGE') {
-        // 直接打开权限页面
-        openPermissionPage();
+// // Add recording control buttons (for testing)
+// function addRecordingControls() {
+//     const controlsDiv = document.createElement('div');
+//     controlsDiv.style.position = 'fixed';
+//     controlsDiv.style.top = '100px';
+//     controlsDiv.style.right = '20px';
+//     controlsDiv.style.zIndex = '10000';
+//     controlsDiv.style.display = 'flex';
+//     controlsDiv.style.flexDirection = 'column';
+//     controlsDiv.style.gap = '10px';
+    
+//     const startButton = document.createElement('button');
+//     startButton.textContent = 'Start Recording';
+//     startButton.style.padding = '8px 16px';
+//     startButton.style.borderRadius = '4px';
+//     startButton.style.cursor = 'pointer';
+//     startButton.onclick = async () => {
+//         const stream = await requestMicrophonePermission();
+//         if (stream) {
+//             await startRecording(stream);
+//         }
+//     };
+    
+//     const stopButton = document.createElement('button');
+//     stopButton.textContent = 'Stop Recording';
+//     stopButton.style.padding = '8px 16px';
+//     stopButton.style.borderRadius = '4px';
+//     stopButton.style.cursor = 'pointer';
+//     stopButton.onclick = () => {
+//         stopRecording();
+//     };
+    
+//     const testButton = document.createElement('button');
+//     testButton.textContent = 'Test Backend Connection';
+//     testButton.style.padding = '8px 16px';
+//     testButton.style.borderRadius = '4px';
+//     testButton.style.cursor = 'pointer';
+//     testButton.onclick = async () => {
+//         await testBackendConnection();
+//     };
+    
+//     controlsDiv.appendChild(startButton);
+//     controlsDiv.appendChild(stopButton);
+//     controlsDiv.appendChild(testButton);
+//     document.body.appendChild(controlsDiv);
+// }
+
+// Test backend connection
+async function testBackendConnection() {
+    try {
+        updateStatusText('Testing backend connection...');
+        
+        // Test regular HTTP connection
+        fetch('http://localhost:8000/debug')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(async data => {
+                console.log('Backend connection test successful:', data);
+                updateStatusText('Backend connection test successful');
+                
+                const resultDiv = document.getElementById('recognition-result');
+                resultDiv.innerHTML = `
+                    <div>Backend connection successful!</div>
+                    <div>System information:</div>
+                    <ul>
+                        <li>Time: ${data.timestamp}</li>
+                        <li>Python version: ${data.system_info.python_version.split(' ')[0]}</li>
+                        <li>Whisper model: ${data.system_info.whisper_model}</li>
+                        <li>CUDA available: ${data.system_info.cuda_available}</li>
+                    </ul>
+                    <div>Now trying WebSocket connection...</div>
+                `;
+                
+                // Test WebSocket connection
+                await initializeWebSocket();
+            })
+            .catch(error => {
+                console.error('Backend connection test failed:', error);
+                updateStatusText('Backend connection test failed');
+                updateIndicatorColor('#F44336'); // Red indicates error
+                
+                const resultDiv = document.getElementById('recognition-result');
+                resultDiv.innerHTML = `
+                    <div>Error: Cannot connect to backend server</div>
+                    <div>Please ensure:</div>
+                    <ol>
+                        <li>Backend server is running (python main.py)</li>
+                        <li>Backend server uses HTTP instead of HTTPS (correctly configured as ws://)</li>
+                        <li>Chrome extension has microphone access permission</li>
+                    </ol>
+                    <div>Error details: ${error.message}</div>
+                `;
+            });
+    } catch (error) {
+        console.error('Connection test failed:', error);
+        updateStatusText('Connection test failed');
+        updateIndicatorColor('#F44336'); // Red indicates error
     }
+}
+
+// Add recording control buttons when page loads
+window.addEventListener('load', async () => {
+    // addRecordingControls();
+    // Initialize WebSocket connection
+    await initializeWebSocket();
 });

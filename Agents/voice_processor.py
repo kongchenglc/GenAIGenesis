@@ -4,7 +4,7 @@ import numpy as np
 
 class VoiceProcessor:
     def __init__(self):
-        # 初始化Whisper模型
+        # Initialize Whisper model
         self.processor = WhisperProcessor.from_pretrained("openai/whisper-base")
         self.model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
         
@@ -15,12 +15,12 @@ class VoiceProcessor:
 
     async def process_audio(self, audio_array: np.ndarray, sample_rate: int) -> str:
         try:
-            # 重采样到16kHz（如果需要）
+            # Resample to 16kHz (if needed)
             if sample_rate != self.sample_rate:
-                # 这里可以添加重采样逻辑
+                # Resampling logic can be added here
                 pass
             
-            # 将音频转换为特征
+            # Convert audio to features
             input_features = self.processor(
                 audio_array,
                 sampling_rate=self.sample_rate,
@@ -30,8 +30,13 @@ class VoiceProcessor:
             if torch.cuda.is_available():
                 input_features = input_features.to("cuda")
             
-            # 生成文本
-            predicted_ids = self.model.generate(input_features)
+            # Generate text with English language forced
+            predicted_ids = self.model.generate(
+                input_features,
+                language="en",  # Force English language
+                task="transcribe"  # Transcription task
+            )
+            
             transcription = self.processor.batch_decode(
                 predicted_ids,
                 skip_special_tokens=True
