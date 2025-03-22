@@ -6,7 +6,7 @@ import datetime
 import platform
 import torch
 
-# 添加父目录到Python路径
+# Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
@@ -25,16 +25,16 @@ from Agents.command_processor import CommandProcessor
 
 app = FastAPI()
 
-# 添加CORS中间件
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源，方便测试
+    allow_origins=["*"],  # Allow all origins for testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 初始化处理器
+# Initialize processors
 voice_processor = VoiceProcessor()
 command_processor = CommandProcessor()
 
@@ -46,7 +46,7 @@ def convert_webm_to_wav(webm_data):
     wav_path = webm_path + '.wav'
     
     try:
-        # 使用FFmpeg将WebM转换为WAV
+        # Use FFmpeg to convert WebM to WAV
         subprocess.run([
             'ffmpeg', '-i', webm_path,
             '-acodec', 'pcm_s16le',
@@ -55,16 +55,16 @@ def convert_webm_to_wav(webm_data):
             '-y', wav_path
         ], check=True, capture_output=True)
 
-        # 读取转换后的WAV文件
+        # Read the converted WAV file
         audio_array, sample_rate = sf.read(wav_path)
         
-        # 清理临时文件
+        # Clean up temporary files
         os.unlink(webm_path)
         os.unlink(wav_path)
         
         return audio_array, sample_rate
     except Exception as e:
-        # 确保清理临时文件
+        # Ensure temporary files are cleaned up
         if os.path.exists(webm_path):
             os.unlink(webm_path)
         if os.path.exists(wav_path):
@@ -208,7 +208,7 @@ async def debug():
     }
 
 if __name__ == "__main__":
-    # 使用HTTP运行服务器
+    # Use HTTP to run the server
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

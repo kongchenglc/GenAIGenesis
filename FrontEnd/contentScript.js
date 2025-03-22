@@ -1,16 +1,16 @@
-// 创建 overlay
+// Create overlay
 let voiceOverlay = document.createElement('div');
 voiceOverlay.id = 'voice-control-overlay';
 voiceOverlay.innerHTML = `
       <div class="voice-status">
           <div class="voice-indicator"></div>
-          <span class="status-text">Hold space key to start talk</span>
+          <span class="status-text">Hold space key to start voice assistant</span>
       </div>
       <div id="recognition-result" class="recognition-result"></div>
   `;
 document.body.appendChild(voiceOverlay);
 
-// 添加样式
+// Add styles
 if (!document.getElementById('voice-control-style')) {
     const style = document.createElement('style');
     style.id = 'voice-control-style';
@@ -226,7 +226,7 @@ async function initializeWebSocket() {
             reconnectAttempts = 0;
             
             if (!isRecording) {
-                updateStatusText('Connected, hold space key to start talk');
+                updateStatusText('Connected, hold space key to start');
             } else {
                 updateStatusText('Recording...');
             }
@@ -502,7 +502,7 @@ function handleSpaceKeyUp() {
             }
             // Restore standby status if permission not requested or recording not started
             else if (!permissionRequested) {
-                updateStatusText('Hold space key to start talk');
+                updateStatusText('Hold space key to start voice assistant');
                 updateIndicatorColor('#f0ad4e'); // Yellow indicates standby
             }
         }
