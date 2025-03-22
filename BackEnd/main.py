@@ -7,14 +7,14 @@ import platform
 import torch
 import traceback
 from pydantic import BaseModel
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request
+
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add current directory to Python path to help with module resolution
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
@@ -28,6 +28,9 @@ import tempfile
 from Agents.voice_processor import VoiceProcessor
 from Agents.command_processor import CommandProcessor
 
+from schemas.PageSchema import PageContent
+from schemas.ActionSchema import ActionItem
+
 # Try to import BeautifulSoup early to detect issues
 try:
     from bs4 import BeautifulSoup
@@ -36,17 +39,7 @@ except ImportError as e:
     print(f"Warning: BeautifulSoup import failed: {e}")
     print("Page analysis functionality may not work correctly")
 
-# Define page content model
-class PageContent(BaseModel):
-    html: str
-    text: str
-    url: str
 
-class ActionItem(BaseModel):
-    description: str
-    action_type: str
-    target_element: str = None
-    parameters: dict = None
 
 app = FastAPI()
 
