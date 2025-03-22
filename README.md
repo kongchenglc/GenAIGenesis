@@ -1,4 +1,4 @@
-# 🔹 InSight: Browser Agent for the Visually Impaired (Chrome Extension)
+# InSight: Browser Agent for the Visually Impaired (Chrome Extension)
 
 ## 📌 Motivation
 
@@ -45,10 +45,10 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 
 | Component                        | Technology / Model                                          |
 | -------------------------------- | ----------------------------------------------------------- |
+| **AI Browser Agent**             | Gemini Model given external tools                           |
 | **Speech-to-Text (STT)**         | Web Speech API or Google Cloud Speech-to-Text               |
 | **Text-to-Speech (TTS)**         | Web Speech Synthesis API                                    |
-| **AI Summarization**             | OpenAI GPT-4 or LLaMA for text processing                   |
-| **Web Interaction & Navigation** | Chrome Extensions API (Tabs, Scripting)                     |
+| **Web Interaction & Navigation** | Playwright/Scrapybara                                       |
 | **Visual Content Processing**    | Computer Vision models (for analyzing webpage images/icons) |
 
 ---
@@ -63,27 +63,6 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 
 ---
 
-## 🔹 Development Roadmap
-
-### 🟢 Phase 1: Core Development (Weeks 1-2)
-
-✅ Set up **Chrome Extension framework** (`manifest.json`, `popup.js`, `background.js`).  
-✅ Implement **basic voice input & command execution** using Web Speech API.  
-✅ Develop **initial webpage content extraction & text-to-speech read-aloud**.
-
-### 🟡 Phase 2: AI Integration (Weeks 3-5)
-
-✅ Integrate **GPT-4/LLaMA** for intelligent summarization.  
-✅ Implement **tab management & smart memory** for frequently visited sites.  
-✅ Add **real-time notifications** for background monitoring.
-
-### 🟠 Phase 3: User Testing & Optimization (Weeks 6-8)
-
-✅ Conduct **blind user testing** to improve usability.  
-✅ Enhance **speech recognition accuracy** and command flexibility.  
-✅ Optimize **AI models** for **faster response times**.
-
----
 
 ## 🔹 Future Enhancements
 
