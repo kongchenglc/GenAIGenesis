@@ -1,78 +1,90 @@
-# InSight: Browser Agent for the Visually Impaired (Chrome Extension)
+# GenAIGenesis - Voice-Controlled Web Page Agent
 
-## 📌 Motivation
+A voice-interactive system that allows users to analyze web pages and interact with page elements using voice commands.
 
-This Chrome extension is designed to help **blind or visually impaired users** navigate websites **independently** using **AI-powered voice interaction**. By developing a robust browser agent and then integrating **speech recognition, AI-driven summarization, and smart multitasking**, the extension ensures a **seamless and accessible web experience**.
+## Architecture Overview
 
----
+The system is built with a frontend-backend architecture using an agent-based design:
 
-## 🔹 Key Features
+### Frontend (Chrome Extension)
+- **Content Script**: Runs on web pages to capture page content and process voice commands
+- **Background Script**: Handles communication with the backend server
+- **UI Components**: Provides visual feedback and voice output to the user
 
-### 🎙️ Voice-Controlled AI – Search & Web Navigation
+### Backend (FastAPI Server)
+- **WebPageAgent**: Analyzes web pages and processes voice commands
+- **ModelService**: Interfaces with AI models for content analysis
+- **API Endpoints**: Provides HTTP and WebSocket endpoints for frontend communication
 
-✅ Users can **search and navigate** specific websites (e.g., **Amazon, live sports audio streaming**) via voice commands.  
-✅ AI assists with **product searches, price comparisons, and checking live sports scores**.
+### Data Flow
+1. User activates the assistant and speaks a command
+2. Content Script captures audio and performs speech recognition
+3. Command is sent to the Backend through the Background Script
+4. WebPageAgent processes the command and returns a response
+5. Content Script executes any required actions on the page
+6. Feedback is provided to the user via voice and UI
 
-### 🧠 AI-Powered Summarization & Read-Aloud
+## Key Components
 
-✅ Extracts **key content** from webpages (e.g., product details, articles, action buttons).  
-✅ Generates **concise summaries** and reads them aloud to the user.  
-✅ Highlights available **interactive actions**, such as **"Add to Cart"** or **"Play Audio"**.
+### WebPageAgent
+- Analyzes web page content to identify interactive elements
+- Processes voice commands in the context of the current page
+- Extracts information from HTML using pattern matching
+- Connects to AI models for advanced analysis when available
 
-### 🎤 Hands-Free Voice Commands
+### Voice Interaction
+- Recognizes wake phrases to activate the assistant
+- Processes natural language commands
+- Supports commands for page analysis and element interaction
+- Provides voice feedback for actions
 
-✅ Users can **control the browser** through voice, for example:
+### Page Analysis
+- Extracts HTML, text, and screenshot from the current page
+- Identifies interactive elements like buttons, links, and input fields
+- Generates a list of possible actions based on the page content
+- Summarizes the page content and purpose
 
-- "Go to my shopping cart"
-- "Read the latest news headlines"
-- "Summarize this article"
+## Data Structures
 
-### 🌐 Smart Navigation & Multitasking
+### PageContent
+- `html`: HTML content of the page
+- `text`: Text content of the page
+- `url`: URL of the page
+- `screenshot`: Base64-encoded screenshot (optional)
 
-✅ **Smart Memory**
+### ElementInfo
+- `element_type`: Type of element (button, input, link, etc.)
+- `text`: Text content of the element
+- `id`: ID attribute of the element
+- `css_selector`: CSS selector for the element
 
-- The AI **remembers frequently visited websites**, providing **quick access via voice commands** for a more efficient browsing experience.
+### ActionItem
+- `description`: Description of the action
+- `action_type`: Type of action (click, input, etc.)
+- `target_element`: Target element selector
+- `element_info`: Information about the target element
 
-✅ **Seamless Multitasking**
+## Supported Commands
 
-- The AI **manages multiple browser tabs**, allowing users to switch between them using **voice commands**.
-- Provides **real-time updates** (e.g., "Your sports page just updated the live score").
-- AI **monitors important information** in the background and notifies users when necessary.
+- **Page Analysis**: "What's on this page?", "Describe this page"
+- **Element Interaction**: "Click the login button", "Enter 'example' in the search field"
+- **Assistant Control**: "Hey assistant", "Goodbye assistant"
 
----
+## Setup and Installation
 
-## 🔹 Core Technologies & Models
+### Frontend
+1. Load the extension in Chrome developer mode
+2. Navigate to a web page
+3. Press the space key or say "Hey assistant" to activate
 
-| Component                        | Technology / Model                                          |
-| -------------------------------- | ----------------------------------------------------------- |
-| **AI Browser Agent**             | Gemini Model given external tools                           |
-| **Speech-to-Text (STT)**         | Web Speech API or Google Cloud Speech-to-Text               |
-| **Text-to-Speech (TTS)**         | Web Speech Synthesis API                                    |
-| **Web Interaction & Navigation** | Playwright/Scrapybara                                       |
-| **Visual Content Processing**    | Computer Vision models (for analyzing webpage images/icons) |
+### Backend
+1. Install Python dependencies: `pip install -r requirements.txt`
+2. Run the server: `python -m uvicorn main:app --reload`
 
----
+## Implementation Details
 
-## 🔹 Challenges & Considerations
-
-🚧 **Meeting User Needs**: Some blind users may not frequently use web browsers, so the extension must be **intuitive** with minimal setup.  
-🚧 **Voice Command Complexity**: Ensuring **accurate speech recognition** across different accents and speech patterns.  
-🚧 **Complex Web Structures**: Websites have **varied HTML structures**, making it challenging to extract **relevant content** (e.g., product descriptions, headlines, interactive elements).  
-🚧 **Real-Time Performance**: Ensuring **fast response times** for voice interactions and AI-generated summaries.  
-🚧 **Security & Privacy**: Protecting user data, especially **voice recordings and browsing history**.
-
----
-
-
-## 🔹 Future Enhancements
-
-🔹 **Support for More Languages** (Multilingual speech recognition and synthesis).  
-🔹 **Mobile Browser Compatibility** (Adaptation for Android/iOS browsers).  
-🔹 **Advanced Image Recognition** (Using computer vision to describe images on webpages).  
-🔹 **Personalized AI Recommendations** (AI learns user preferences and suggests relevant content).
-
----
-
-## 🚀 Final Goal
-
-To create an **AI-driven, voice-controlled web assistant** that enables **blind and visually impaired users** to **browse, navigate, and interact with websites effortlessly** using voice commands.
+- Speech recognition uses Web Speech API when available
+- Page analysis uses regex patterns to extract elements
+- WebSocket provides real-time communication
+- HTTP endpoints serve as a fallback for WebSocket
+- AI model integration is pluggable through ModelService

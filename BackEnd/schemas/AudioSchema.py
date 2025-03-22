@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-class AudioRequest(BaseModel)::
+class AudioRequest(BaseModel):
     is_activated: bool = Field(default=False, description="Whether voice activation is enabled")
 
 class WebSocketResponse(BaseModel):

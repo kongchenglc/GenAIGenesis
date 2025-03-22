@@ -46,6 +46,9 @@ class VoiceAssistant {
     this.speak = this.speak.bind(this);
     this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleKeyUp = this.handleKeyUp.bind(this);
+    this.handleWebSocketMessage = this.handleWebSocketMessage.bind(this);
+    this.handleActionResponse = this.handleActionResponse.bind(this);
+    this.executeActionItem = this.executeActionItem.bind(this);
   }
 
   /**
@@ -176,6 +179,13 @@ class VoiceAssistant {
       document.addEventListener('keydown', this.handleKeyDown);
       document.addEventListener('keyup', this.handleKeyUp);
     }
+    
+    // Listen for messages from the background script
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === "WEBSOCKET_MESSAGE") {
+        this.handleWebSocketMessage(message.data);
+      }
+    });
   }
 
   /**
@@ -281,49 +291,57 @@ class VoiceAssistant {
    */
   async startRecording() {
     try {
-      if (this.state.isRecording) return;
-      
+      console.log("=== Starting recording ===");
       // Reset audio chunks
       this.state.audioChunks = [];
       
       // Request microphone access
+      console.log("Requesting microphone access");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       // Create media recorder
+      console.log("Creating MediaRecorder");
       this.state.mediaRecorder = new MediaRecorder(stream);
       
       // Set up event handlers
       this.state.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
+          console.log(`Received audio chunk: ${event.data.size} bytes`);
           this.state.audioChunks.push(event.data);
         }
       };
       
       this.state.mediaRecorder.onstop = () => {
-        // Process the recorded audio
+        console.log(`Recording stopped, total chunks: ${this.state.audioChunks.length}`);
         if (this.state.audioChunks.length > 0) {
+          // Combine audio chunks
           const audioBlob = new Blob(this.state.audioChunks, { type: 'audio/webm' });
+          console.log(`Created audio blob: ${audioBlob.size} bytes`);
           this.processAudioData(audioBlob);
+        } else {
+          console.log("No audio data collected during recording");
+          if (this.state.isActivated) {
+            this.startRecording();
+          }
         }
-        
-        // Stop all tracks
-        stream.getTracks().forEach(track => track.stop());
       };
       
       // Start recording
+      console.log("Starting MediaRecorder");
       this.state.mediaRecorder.start();
       this.state.isRecording = true;
       
-      // Set a timeout to stop recording after a certain time
+      // Set recording timeout
       setTimeout(() => {
-        if (this.state.isRecording) {
+        if (this.state.isRecording && this.state.mediaRecorder && this.state.mediaRecorder.state === 'recording') {
+          console.log(`Recording timeout reached (${this.config.recordingTimeout}ms), stopping recording`);
           this.stopRecording();
         }
       }, this.config.recordingTimeout);
       
     } catch (error) {
       console.error("Error starting recording:", error);
-      this.updateFeedbackText("Could not access microphone.", true);
+      this.updateFeedbackText("Error accessing microphone. Please check permissions.", true);
     }
   }
 
@@ -342,33 +360,120 @@ class VoiceAssistant {
    */
   async processAudioData(audioBlob) {
     try {
+      console.log("=== Processing audio data ===");
+      console.log(`Audio blob size: ${audioBlob.size} bytes, type: ${audioBlob.type}`);
       this.updateFeedbackText("Processing...", true);
       
       // Send audio to background script
+      console.log("Sending audio to background script...");
       const response = await chrome.runtime.sendMessage({
         type: "SEND_AUDIO",
         audioData: audioBlob,
         isActivated: this.state.isActivated
       });
       
+      console.log(`Received response from background script:`, response);
+      
       if (response.error) {
+        console.error(`Error from backend: ${response.error}`);
         throw new Error(response.error);
       }
       
-      if (response.command) {
-        this.handleCommand(response.command);
-      } else if (response.transcription) {
-        this.updateFeedbackText(response.transcription, true);
+      if (response.action_items && response.is_action_required) {
+        // Handle ActionResponse from backend
+        console.log(`Received action items (${response.action_items.length})`, response.action_items);
+        this.handleActionResponse(response);
+      } else if (response.message) {
+        // Handle WebSocketResponse
+        console.log(`Received message: ${response.message}`);
+        this.updateFeedbackText(response.message, true);
+        if (response.is_activated !== undefined) {
+          console.log(`Activation state from backend: ${response.is_activated}`);
+          // Update activation state if provided
+          if (response.is_activated !== this.state.isActivated) {
+            if (response.is_activated) {
+              this.activate();
+            } else {
+              this.deactivate();
+            }
+          }
+        }
       }
       
       // If still activated, start recording again
       if (this.state.isActivated) {
+        console.log("Still activated, starting recording again");
         this.startRecording();
       }
       
     } catch (error) {
       console.error("Error processing audio:", error);
       this.updateFeedbackText("Error processing audio.", true);
+    }
+  }
+
+  /**
+   * Handle action response from the backend
+   */
+  handleActionResponse(response) {
+    if (!response.action_items || !response.is_action_required) return;
+    
+    // Process each action item
+    for (const actionItem of response.action_items) {
+      this.executeActionItem(actionItem);
+    }
+    
+    // Give feedback about actions
+    if (response.action_items.length > 0) {
+      const actionSummary = `Executed ${response.action_items.length} actions.`;
+      this.updateFeedbackText(actionSummary, true);
+      this.speak(actionSummary);
+    }
+  }
+  
+  /**
+   * Execute a single action item
+   */
+  executeActionItem(actionItem) {
+    try {
+      const { description, action_type, target_element, parameters } = actionItem;
+      
+      // Log action for debugging
+      console.log(`Executing action: ${action_type} on ${target_element}`);
+      
+      switch (action_type) {
+        case "click":
+          this.executeDomAction({
+            action_type: "click",
+            target: target_element,
+            element_attributes: parameters
+          });
+          break;
+          
+        case "input":
+          this.executeDomAction({
+            action_type: "input",
+            target: target_element,
+            input_text: parameters?.text || ""
+          });
+          break;
+          
+        case "navigate":
+          if (parameters && parameters.url) {
+            window.location.href = parameters.url;
+          }
+          break;
+          
+        case "analyze":
+          this.analyzePage();
+          break;
+          
+        default:
+          console.warn(`Unknown action type: ${action_type}`);
+      }
+      
+    } catch (error) {
+      console.error("Error executing action item:", error);
     }
   }
 
@@ -408,62 +513,119 @@ class VoiceAssistant {
    */
   executeDomAction(command) {
     try {
+      console.log("=== Executing DOM action ===");
+      console.log("Command:", command);
       const { action_type, target, element_type, element_attributes } = command;
       
       if (action_type === "click") {
+        console.log(`Click action on target: ${target}`);
+        console.log(`Element attributes:`, element_attributes);
+        
         // Find target element
         let element = null;
         
         // Try different strategies to find the element
         if (element_attributes && element_attributes.text) {
+          console.log(`Searching for element with text: "${element_attributes.text}"`);
           // Find by text content
           element = Array.from(document.querySelectorAll('button, a, [role="button"]'))
             .find(el => el.textContent.trim().toLowerCase() === element_attributes.text.toLowerCase());
+          
+          if (element) {
+            console.log(`Found element by text: ${element.tagName}, text: ${element.textContent.trim()}`);
+          } else {
+            console.log(`Could not find element with exact text: "${element_attributes.text}"`);
+          }
         }
         
         if (!element && target) {
+          console.log(`Trying to find element by selector or text containing: ${target}`);
           // Try to find by selector or text content
-          element = document.querySelector(target) || 
-                    Array.from(document.querySelectorAll('button, a, [role="button"]'))
-                      .find(el => el.textContent.trim().toLowerCase().includes(target.toLowerCase()));
+          element = document.querySelector(target);
+          if (element) {
+            console.log(`Found element by selector: ${element.tagName}, text: ${element.textContent.trim()}`);
+          } else {
+            // Try to find by partial text match
+            element = Array.from(document.querySelectorAll('button, a, [role="button"]'))
+              .find(el => el.textContent.trim().toLowerCase().includes(target.toLowerCase()));
+            
+            if (element) {
+              console.log(`Found element by partial text match: ${element.tagName}, text: ${element.textContent.trim()}`);
+            } else {
+              console.log(`Could not find element by selector or text containing: ${target}`);
+            }
+          }
         }
         
         if (element) {
+          console.log(`Clicking on element: ${element.tagName}, text: ${element.textContent.trim()}`);
           element.click();
           this.updateFeedbackText(`Clicked on: ${element.textContent || target}`, true);
         } else {
+          console.log(`Failed to find any clickable element for command`, command);
           this.updateFeedbackText(`Could not find element: ${target}`, true);
         }
       }
       
       else if (action_type === "input") {
+        console.log(`Input action on target: ${target}`);
         // Find input element
         let element = null;
         
         if (target) {
+          console.log(`Searching for input element with target: ${target}`);
           // Try to find by selector or placeholder/label
-          element = document.querySelector(target) || 
-                    document.querySelector(`input[placeholder*="${target}"]`) ||
-                    document.querySelector(`label[for*="${target}"]`) ||
-                    document.querySelector(`textarea[placeholder*="${target}"]`);
+          element = document.querySelector(target);
+          if (element) {
+            console.log(`Found input element by selector: ${element.tagName}`);
+          } else {
+            // Try by placeholder
+            element = document.querySelector(`input[placeholder*="${target}"]`);
+            if (element) {
+              console.log(`Found input element by placeholder: ${element.placeholder}`);
+            } else {
+              // Try by label
+              element = document.querySelector(`label[for*="${target}"]`);
+              if (element) {
+                console.log(`Found label element for input: ${element.textContent.trim()}`);
+              } else {
+                // Try textarea
+                element = document.querySelector(`textarea[placeholder*="${target}"]`);
+                if (element) {
+                  console.log(`Found textarea element by placeholder: ${element.placeholder}`);
+                } else {
+                  console.log(`Could not find input element for target: ${target}`);
+                }
+              }
+            }
+          }
         }
         
         if (element && element.tagName === 'LABEL') {
           const inputId = element.getAttribute('for');
           if (inputId) {
+            console.log(`Found label with for=${inputId}, looking for corresponding input`);
             element = document.getElementById(inputId);
+            if (element) {
+              console.log(`Found input with id=${inputId}`);
+            } else {
+              console.log(`Could not find input with id=${inputId}`);
+            }
           }
         }
         
         if (element) {
+          console.log(`Focusing input element: ${element.tagName}, id: ${element.id || 'none'}`);
           element.focus();
           if (command.input_text) {
+            console.log(`Setting input value to: "${command.input_text}"`);
             element.value = command.input_text;
             // Trigger input event
             element.dispatchEvent(new Event('input', { bubbles: true }));
           }
           this.updateFeedbackText(`Entered text in: ${target}`, true);
         } else {
+          console.log(`Failed to find any input element for command`, command);
           this.updateFeedbackText(`Could not find input: ${target}`, true);
         }
       }
@@ -479,29 +641,47 @@ class VoiceAssistant {
    */
   async analyzePage() {
     try {
+      console.log("=== Analyzing page ===");
+      console.log(`Current URL: ${window.location.href}`);
       this.updateFeedbackText("Analyzing page...", true);
       
-      // Collect page content
+      // Collect page content according to PageSchema
       const pageContent = {
         html: document.documentElement.outerHTML,
         text: document.body.innerText,
         url: window.location.href
       };
       
+      console.log(`Page content collected - HTML length: ${pageContent.html.length}, Text length: ${pageContent.text.length}`);
+      
       // Send to background script for analysis
+      console.log("Sending page content to background script for analysis");
       const response = await chrome.runtime.sendMessage({
         type: "ANALYZE_PAGE",
         pageContent: pageContent
       });
       
+      console.log("Received page analysis response:", response);
+      
       if (response.error) {
+        console.error(`Error analyzing page: ${response.error}`);
         throw new Error(response.error);
       }
       
       // Process and present analysis results
-      if (response.main_content) {
-        this.speak(response.main_content);
-        this.updateFeedbackText(response.main_content, true);
+      if (response.message) {
+        console.log(`Page analysis message: ${response.message}`);
+        this.speak(response.message);
+        this.updateFeedbackText(response.message, true);
+      }
+      
+      if (response.summary) {
+        console.log(`Page summary: ${response.summary}`);
+      }
+      
+      if (response.interactive_elements && response.interactive_elements.length > 0) {
+        console.log(`Found ${response.interactive_elements.length} interactive elements:`, 
+          response.interactive_elements);
       }
       
     } catch (error) {
@@ -530,16 +710,55 @@ class VoiceAssistant {
       window.speechSynthesis.speak(utterance);
     }
   }
+
+  /**
+   * Handle WebSocket messages from the background script
+   */
+  handleWebSocketMessage(data) {
+    try {
+      console.log("=== Received WebSocket message ===", data);
+      
+      // Handle WebSocketResponse schema
+      if (data.message) {
+        console.log(`WebSocket message: ${data.message}`);
+        this.updateFeedbackText(data.message, true);
+        this.speak(data.message);
+        
+        if (data.is_activated !== undefined) {
+          console.log(`WebSocket activation state: ${data.is_activated}`);
+          // Update activation state if provided
+          if (data.is_activated !== this.state.isActivated) {
+            if (data.is_activated) {
+              console.log("Activating based on WebSocket message");
+              this.activate();
+            } else {
+              console.log("Deactivating based on WebSocket message");
+              this.deactivate();
+            }
+          }
+        }
+      }
+      
+      // Handle ActionResponse schema
+      if (data.action_items && data.is_action_required) {
+        console.log(`WebSocket action items (${data.action_items.length}):`, data.action_items);
+        this.handleActionResponse(data);
+      }
+    } catch (error) {
+      console.error("Error handling WebSocket message:", error);
+    }
+  }
 }
 
-// Initialize the assistant when the page is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  const assistant = new VoiceAssistant();
-  assistant.init();
-});
-
-// Make sure it also works when loaded after DOMContentLoaded
+// Initialize assistant only once
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  // Document already loaded, initialize immediately
   const assistant = new VoiceAssistant();
   assistant.init();
+} else {
+  // Wait for document to load
+  document.addEventListener('DOMContentLoaded', () => {
+    const assistant = new VoiceAssistant();
+    assistant.init();
+  });
 }
