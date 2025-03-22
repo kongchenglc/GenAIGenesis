@@ -197,48 +197,133 @@ Provide a 1-2 sentence summary focused on the specific content of this page."""
         if self.browser:
             await self.browser.close()
 
-def display_quick_summary(summary: Dict, links: Dict[str, str]):
-    """Display a minimal summary with navigation options"""
-    rprint(Panel.fit(
-        f"[bold blue]Quick Summary:[/bold blue]\n{summary['summary']}\n\n"
-        f"[bold blue]Navigation Options:[/bold blue]",
-        title="Quick Page Overview",
-        border_style="blue"
-    ))
+def _group_navigation_options(links: Dict[str, str]) -> Dict[str, List[Tuple[str, str]]]:
+    """Group navigation options into categories for better organization"""
+    # General categories that work across different types of websites
+    categories = {
+        "Main": ["home", "main", "index", "about", "welcome"],
+        "Info": ["about", "info", "learn", "overview", "details", "description"],
+        "Features": ["features", "services", "products", "offerings", "solutions"],
+        "Resources": ["resources", "docs", "documentation", "guides", "blog", "news", "articles"],
+        "User": ["sign", "login", "account", "profile", "register", "settings", "preferences"],
+        "Support": ["help", "support", "faq", "contact", "feedback"]
+    }
     
-    if links:
-        for idx, (text, url) in enumerate(links.items(), 1):
-            print(f"{idx}. {text}")
-    else:
-        print("No navigation options found")
+    grouped = {cat: [] for cat in categories}
+    other = []
+    
+    for text, url in links.items():
+        text_lower = text.lower()
+        categorized = False
+        for cat, keywords in categories.items():
+            if any(keyword in text_lower for keyword in keywords):
+                grouped[cat].append((text, url))
+                categorized = True
+                break
+        if not categorized:
+            other.append((text, url))
+    
+    # Clean up empty categories and sort items within each category
+    # Only show Other if it has items and we have less than 3 main categories
+    result = {k: sorted(v) for k, v in grouped.items() if v}
+    if other and len(result) < 3:
+        result["More"] = other[:5]  # Limit other items to top 5
+    
+    return result
+
+def display_quick_summary(summary: Dict, links: Dict[str, str]):
+    """Display a conversational summary and navigation options"""
+    # Clear any previous output for cleaner display
+    print("\n" + "="*80 + "\n")
+    
+    # Show the summary naturally
+    print(f"{summary['summary']}\n")
+    
+    if not links:
+        print("I don't see any navigation options on this page.")
+        return
+        
+    # Clean up navigation options
+    nav_options = {}  # text -> url mapping
+    
+    for text, url in links.items():
+        # Clean up the text
+        text = text.strip().replace('\n', ' ').replace('  ', ' ')
+        
+        # Skip very short or duplicate-looking links
+        if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
+            continue
+            
+        nav_options[text] = url
+        
+        # Keep list manageable
+        if len(nav_options) >= 7:
+            break
+    
+    if nav_options:
+        print("I can take you to any of these sections:")
+        print(", ".join(nav_options.keys()))
+    
+    print("\nJust tell me where you'd like to go!")
+    return nav_options
+
+def _match_user_intent(user_input: str, available_options: Dict[str, str], model) -> Optional[str]:
+    """Use LLM to match user input to available navigation options"""
+    # First check if user wants to exit
+    if any(word in user_input.lower() for word in ['quit', 'exit', 'bye', 'goodbye', 'q', 'stop', 'end']):
+        return 'EXIT'
+        
+    prompt = f"""Given these available navigation options: {list(available_options.keys())}
+
+User said: "{user_input}"
+
+Which option (if any) are they most likely trying to navigate to? Return EXACTLY one of the available options if there's a match, or "none" if no good match.
+Only return the matching text or "none", nothing else."""
+
+    try:
+        response = model.generate_content(prompt)
+        match = response.text.strip().strip('"').strip("'")
+        return match if match in available_options else None
+    except Exception:
+        return None
 
 async def interactive_session(summarizer: FastWebSummarizer, initial_url: str):
-    """Quick interactive navigation session"""
+    """Interactive navigation session with natural language interface"""
     current_url = initial_url
     
-    while True:
-        try:
-            summary, links = await summarizer.quick_summarize(current_url)
-            display_quick_summary(summary, links)
-            
-            choice = Prompt.ask("\nEnter a number to navigate, 'q' to quit", default="q")
-            if choice.lower() == 'q':
-                break
-            
+    try:
+        while True:
             try:
-                idx = int(choice)
-                if 1 <= idx <= len(links):
-                    current_url = list(links.values())[idx - 1]
-                else:
-                    console.print("[red]Invalid option[/red]")
-            except ValueError:
-                console.print("[red]Invalid choice[/red]")
+                summary, links = await summarizer.quick_summarize(current_url)
+                nav_options = display_quick_summary(summary, links)
                 
-        except Exception as e:
-            console.print(f"[red]Error: {str(e)}[/red]")
-            break
-
-    await summarizer.close()
+                if not nav_options:
+                    print("\nLooks like we've reached a page without any navigation options.")
+                    break
+                    
+                user_input = input().strip()
+                matched_option = _match_user_intent(user_input, nav_options, summarizer.model)
+                
+                if matched_option == 'EXIT':
+                    print("\nAlright, hope that was helpful!")
+                    break
+                elif matched_option:
+                    print(f"\nTaking you to {matched_option}...")
+                    current_url = nav_options[matched_option]
+                else:
+                    print("\nI'm not sure where you want to go. Could you try saying it differently?")
+                    print("You can go to any of these sections:", ", ".join(nav_options.keys()))
+                    
+            except KeyboardInterrupt:
+                print("\n\nGot it, stopping now!")
+                break
+            except Exception as e:
+                print(f"\nOops, something went wrong: {str(e)}")
+                print("Let's try something else.")
+                break
+    finally:
+        # Always ensure we clean up
+        await summarizer.close()
 
 async def main():
     parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
@@ -246,12 +331,18 @@ async def main():
     parser.add_argument("--api-key", help="Google API Key (optional, can use GOOGLE_API_KEY env var)")
     args = parser.parse_args()
 
+    summarizer = None
     try:
         summarizer = FastWebSummarizer(api_key=args.api_key)
         await interactive_session(summarizer, args.url)
+    except KeyboardInterrupt:
+        print("\n\nGot it, stopping now!")
     except Exception as e:
-        console.print(f"[red]Error: {str(e)}[/red]")
+        print(f"\nError: {str(e)}")
         sys.exit(1)
+    finally:
+        if summarizer:
+            await summarizer.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
