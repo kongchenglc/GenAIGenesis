@@ -3,21 +3,22 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 import numpy as np
 
 class VoiceProcessor:
-    def __init__(self):
-        # Initialize Whisper model
-        self.processor = WhisperProcessor.from_pretrained("openai/whisper-base")
-        self.model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-base")
+    def __init__(self, model_name="openai/whisper-base", sample_rate=16000):
+        # Initialize Whisper model with configurable model name
+        self.processor = WhisperProcessor.from_pretrained(model_name)
+        self.model = WhisperForConditionalGeneration.from_pretrained(model_name)
         
         if torch.cuda.is_available():
             self.model = self.model.to("cuda")
         
-        self.sample_rate = 16000
+        self.sample_rate = sample_rate
 
     async def process_audio(self, audio_array: np.ndarray, sample_rate: int) -> str:
+        """Process audio data and convert to text"""
         try:
-            # Resample to 16kHz (if needed)
+            # Resample if needed (placeholder for actual resampling logic)
             if sample_rate != self.sample_rate:
-                # Resampling logic can be added here
+                # Resampling logic would go here
                 pass
             
             # Convert audio to features
@@ -30,11 +31,11 @@ class VoiceProcessor:
             if torch.cuda.is_available():
                 input_features = input_features.to("cuda")
             
-            # Generate text with English language forced
+            # Generate text
             predicted_ids = self.model.generate(
                 input_features,
-                language="en",  # Force English language
-                task="transcribe"  # Transcription task
+                language="en",
+                task="transcribe"
             )
             
             transcription = self.processor.batch_decode(
