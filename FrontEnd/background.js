@@ -1,208 +1,49 @@
-// Configuration for OpenAI API
-const OPENAI_API_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
-let API_KEY = ''; // Will be set through settings
+// 添加到 background.js 中的适当位置
+// 在扩展启动或安装时自动打开权限页面
+let hasOpenedPermissionPage = false;
 
-// 跟踪当前的权限页面
-let permissionTabId = null;
-let isListening = false;
-
-// Load API key from storage
-chrome.storage.sync.get(['openaiApiKey'], (result) => {
-    if (result.openaiApiKey) {
-        API_KEY = result.openaiApiKey;
-    }
+// 扩展启动时自动打开权限页面
+chrome.runtime.onStartup.addListener(() => {
+    openPermissionPageIfNeeded();
 });
 
-// Listen for messages from popup and content scripts
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    switch (request.action) {
-        case 'search':
-            handleSearch(request.searchTerm);
-            break;
-        case 'navigate':
-            handleNavigation(request.website);
-            break;
-        case 'readPage':
-            handlePageReading(sender.tab.id);
-            break;
-        case 'summarize':
-            handleSummarization(sender.tab.id);
-            break;
-        case 'switchTab':
-            handleTabSwitch(request.tabNumber);
-            break;
-        case 'startListening':
-            // 记录我们正在监听
-            isListening = true;
-            break;
-        case 'stopListening':
-            // 停止监听
-            isListening = false;
-            // 如果权限页面存在，通知它停止监听
-            if (permissionTabId) {
-                chrome.tabs.sendMessage(permissionTabId, { action: 'stopListening' });
-            }
-            break;
-        case 'setPermissionTabId':
-            // 保存权限页面的tabId以便之后通信
-            permissionTabId = sender.tab.id;
-            break;
-        case 'commandRecognized':
-            // 转发语音命令给弹出窗口
-            chrome.runtime.sendMessage({
-                action: 'commandRecognized',
-                command: request.command
-            });
-            break;
-    }
-    return true; // Indicates async response
-});
-
-async function handleSearch(searchTerm) {
-    try {
-        const url = `https://www.google.com/search?q=${encodeURIComponent(searchTerm)}`;
-        const tab = await chrome.tabs.create({ url });
-        await speakText(`Searching for ${searchTerm}`);
-    } catch (error) {
-        console.error('Search error:', error);
-    }
-}
-
-async function handleNavigation(website) {
-    try {
-        let url = website;
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'https://' + url;
-        }
-        const tab = await chrome.tabs.create({ url });
-        await speakText(`Navigating to ${website}`);
-    } catch (error) {
-        console.error('Navigation error:', error);
-    }
-}
-
-async function handlePageReading(tabId) {
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const result = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            function: extractPageContent
-        });
-        
-        const content = result[0].result;
-        await speakText(content);
-    } catch (error) {
-        console.error('Page reading error:', error);
-    }
-}
-
-async function handleSummarization(tabId) {
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const result = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            function: extractPageContent
-        });
-        
-        const content = result[0].result;
-        const summary = await generateSummary(content);
-        await speakText(summary);
-    } catch (error) {
-        console.error('Summarization error:', error);
-    }
-}
-
-async function handleTabSwitch(tabNumber) {
-    try {
-        const tabs = await chrome.tabs.query({ currentWindow: true });
-        if (tabNumber > 0 && tabNumber <= tabs.length) {
-            await chrome.tabs.update(tabs[tabNumber - 1].id, { active: true });
-            await speakText(`Switched to tab ${tabNumber}`);
-        } else {
-            await speakText(`Tab ${tabNumber} does not exist`);
-        }
-    } catch (error) {
-        console.error('Tab switch error:', error);
-    }
-}
-
-// Helper function to extract page content
-function extractPageContent() {
-    const article = document.querySelector('article') || document.body;
-    return article.innerText
-        .replace(/\s+/g, ' ')
-        .trim()
-        .substring(0, 5000); // Limit content length
-}
-
-// Helper function to generate summary using OpenAI API
-async function generateSummary(content) {
-    if (!API_KEY) {
-        return 'Please set your OpenAI API key in the extension settings.';
-    }
-
-    try {
-        const response = await fetch(OPENAI_API_ENDPOINT, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_KEY}`
-            },
-            body: JSON.stringify({
-                model: 'gpt-4',
-                messages: [
-                    {
-                        role: 'system',
-                        content: 'You are a helpful assistant that summarizes web content concisely.'
-                    },
-                    {
-                        role: 'user',
-                        content: `Please summarize the following text in a clear and concise way, suitable for visually impaired users: ${content}`
-                    }
-                ],
-                max_tokens: 150
-            })
-        });
-
-        const data = await response.json();
-        return data.choices[0].message.content;
-    } catch (error) {
-        console.error('Summary generation error:', error);
-        return 'Error generating summary. Please try again.';
-    }
-}
-
-// Helper function to speak text
-async function speakText(text) {
-    return new Promise((resolve, reject) => {
-        chrome.tts.speak(text, {
-            onEvent: function(event) {
-                if (event.type === 'end') {
-                    resolve();
-                } else if (event.type === 'error') {
-                    reject(new Error('TTS Error: ' + event.errorMessage));
-                }
-            }
-        });
-    });
-}
-
-// 监听Tab关闭事件，以便在权限页面关闭时更新状态
-chrome.tabs.onRemoved.addListener((tabId) => {
-    if (tabId === permissionTabId) {
-        permissionTabId = null;
-        // 如果正在监听，通知弹出窗口权限页面已关闭
-        if (isListening) {
-            chrome.runtime.sendMessage({
-                action: 'permissionPageClosed'
-            });
-        }
-    }
-});
-
-// Handle installation and updates
+// 扩展安装或更新时也打开权限页面
 chrome.runtime.onInstalled.addListener((details) => {
-    if (details.reason === 'install') {
+    if (details.reason === 'install' || details.reason === 'update') {
+        // 先打开选项页
         chrome.runtime.openOptionsPage();
+        // 然后打开权限页面
+        setTimeout(openPermissionPageIfNeeded, 1000);
+    }
+});
+
+// 自动打开权限页面的函数
+function openPermissionPageIfNeeded() {
+    if (!hasOpenedPermissionPage) {
+        const extensionId = chrome.runtime.id;
+        const permissionUrl = `chrome-extension://${extensionId}/permission.html`;
+        
+        chrome.tabs.create({ url: permissionUrl }, (tab) => {
+            permissionTabId = tab.id;
+            hasOpenedPermissionPage = true;
+        });
+    }
+}
+
+// 扩展图标被点击时，确保权限页面打开
+chrome.action.onClicked.addListener(() => {
+    if (!permissionTabId) {
+        openPermissionPageIfNeeded();
+    } else {
+        // 检查权限页面是否仍然存在
+        chrome.tabs.get(permissionTabId, (tab) => {
+            if (chrome.runtime.lastError) {
+                // Tab不存在，需要重新打开
+                openPermissionPageIfNeeded();
+            } else {
+                // Tab存在，切换到该Tab
+                chrome.tabs.update(permissionTabId, { active: true });
+            }
+        });
     }
 });
