@@ -7,14 +7,14 @@ import platform
 import torch
 import traceback
 from pydantic import BaseModel
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request
+
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add current directory to Python path to help with module resolution
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
@@ -27,6 +27,9 @@ import subprocess
 import tempfile
 from Agents.voice_processor import VoiceProcessor
 from Agents.command_processor import CommandProcessor
+
+from schemas.PageSchema import PageContent
+from schemas.ActionSchema import ActionItem
 
 # Try to import BeautifulSoup early to detect issues
 try:

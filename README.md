@@ -1,8 +1,8 @@
-# 🔹 Browser Extension for the Blind or Visually Impaired (Chrome)
+# 🔹 Browser Agent for the Visually Impaired (Chrome Extension)
 
 ## 📌 Motivation
 
-This Chrome extension is designed to help **blind or visually impaired users** navigate websites **independently** using **AI-powered voice interaction**. By integrating **speech recognition, AI-driven summarization, and smart multitasking**, the extension ensures a **seamless and accessible web experience**.
+This Chrome extension is designed to help **blind or visually impaired users** navigate websites **independently** using **AI-powered voice interaction**. By developing a robust browser agent and then integrating **speech recognition, AI-driven summarization, and smart multitasking**, the extension ensures a **seamless and accessible web experience**.
 
 ---
 
