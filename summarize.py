@@ -7,19 +7,15 @@ Provides quick summaries and navigation options within 10 seconds
 
 import os
 import sys
-import json
 import asyncio
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import argparse
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urljoin
 
 import google.generativeai as genai
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+from playwright.async_api import async_playwright
 from rich.console import Console
-from rich.panel import Panel
-from rich import print as rprint
-from rich.prompt import Prompt
 
 # Constants for timeouts and limits
 PAGE_LOAD_TIMEOUT = 7  # seconds
