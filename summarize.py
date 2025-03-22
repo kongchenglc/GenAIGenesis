@@ -228,7 +228,11 @@ def display_quick_summary(summary: Dict, links: Dict[str, str]):
         print(", ".join(nav_options.keys()))
     
     print("\nJust tell me where you'd like to go!")
-    return nav_options
+
+
+    return summary, nav_options
+
+
 
 def generate_nav_options(links: Dict[str, str]):
     nav_options = {}  # text -> url mapping
@@ -268,6 +272,8 @@ def _match_user_intent(user_input: str, available_options: Dict[str, str], model
     # First check if user wants to exit
     if any(word in user_input.lower() for word in ['quit', 'exit', 'bye', 'goodbye', 'q', 'stop', 'end']):
         return 'EXIT'
+    if any(word in user_input.lower() for word in ['back', 'previous']):
+        return 'Okay, going back to the previous page:'
         
     prompt = f"""Given these available navigation options: {list(available_options.keys())}
 
@@ -283,45 +289,39 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def temp(summarizer: FastWebSummarizer, initial_url: str):
+async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
     
     current_url = initial_url
 
     summary, links = await summarizer.quick_summarize(current_url)
     
     try:
-        while True:
-            try:
-                summary, links = await summarizer.quick_summarize(current_url)
-                nav_options = display_quick_summary(summary, links)
-                
-                if not nav_options:
-                    print("\nLooks like we've reached a page without any navigation options.")
-                    break
-                    
-                user_input = input().strip()
-                matched_option = _match_user_intent(user_input, nav_options, summarizer.model)
-                
-                if matched_option == 'EXIT':
-                    print("\nAlright, hope that was helpful!")
-                    break
-                elif matched_option:
-                    print(f"\nTaking you to {matched_option}...")
-                    current_url = nav_options[matched_option]
-                else:
-                    print("\nI'm not sure where you want to go. Could you try saying it differently?")
-                    print("You can go to any of these sections:", ", ".join(nav_options.keys()))
-                    
-            except KeyboardInterrupt:
-                print("\n\nGot it, stopping now!")
-                break
-            except Exception as e:
-                print(f"\nOops, something went wrong: {str(e)}")
-                print("Let's try something else.")
-                break
-    finally:
-        # Always ensure we clean up
-        await summarizer.close()
+        summary, links = await summarizer.quick_summarize(current_url)
+        nav_options = display_quick_summary(summary, links)
+        
+        if not nav_options:
+            print("\nLooks like we've reached a page without any navigation options.")
+            
+        user_input = input().strip()
+        matched_option = _match_user_intent(user_input, nav_options, summarizer.model)
+        
+        if matched_option == 'EXIT':
+            print("\nAlright, hope that was helpful!")
+        elif matched_option:
+            print(f"\nTaking you to {matched_option}...")
+            current_url = nav_options[matched_option]
+        else:
+            print("\nI'm not sure where you want to go. Could you try saying it differently?")
+            print("You can go to any of these sections:", ", ".join(nav_options.keys()))
+            
+    except KeyboardInterrupt:
+        print("\n\nGot it, stopping now!")
+
+    except Exception as e:
+        print(f"\nOops, something went wrong: {str(e)}")
+        print("Let's try something else.")
+
+    await summarizer.close()
 
 async def main():
     parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
