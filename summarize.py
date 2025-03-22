@@ -82,11 +82,28 @@ class FastWebSummarizer:
             cleaned_text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
             context = cleaned_text[:15000]  # Trim for Gemini token limit
 
+            # First get the raw information
             response = self.model.generate_content([
                 f"Webpage content:\n{context}",
                 f"User query: {prompt}\n\nBased on the above content, extract and summarize the relevant information about what the user asked. If no relevant information is found, say so clearly."
             ])
-            return response.text
+            raw_info = response.text
+
+            # Then clean it up and make it more natural
+            cleanup_prompt = f"""Given this information about {prompt}:
+{raw_info}
+
+Please rewrite this in a clear, natural way that:
+1. Uses complete sentences
+2. Is concise but informative
+3. Focuses on the most relevant details
+4. Avoids bullet points or lists
+5. Sounds natural and conversational
+
+Return only the cleaned up text, nothing else."""
+
+            cleaned_response = self.model.generate_content(cleanup_prompt)
+            return cleaned_response.text.strip()
         except Exception as e:
             return f"Error processing content: {str(e)}"
 
@@ -406,7 +423,7 @@ async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
             break
         elif matched_option == 'BACK':
             print("\nGoing back to the previous page...")
-            current_summary = None  # Reset summary for next page
+            current_summary = None  # Reset summary for next pag
             break
         elif matched_option == 'INFO_REQUEST':
             print("\nLet me search for that information...")
