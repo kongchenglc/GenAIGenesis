@@ -4,7 +4,7 @@
 
 This Chrome extension is designed to assist blind or visually impaired users in navigating websites independently through AI-powered voice interaction. By combining speech recognition, AI-driven summarization, and smart multitasking, the extension ensures a seamless and accessible web experience.
 
-⸻
+---
 
 🔹 Key Features
 
@@ -34,7 +34,7 @@ This Chrome extension is designed to assist blind or visually impaired users in 
 	•	It provides real-time updates (e.g., “Your sports page just updated the live score”).
 	•	AI can monitor important information in the background and notify the user when needed.
 
-⸻
+---
 
 🔹 Core Technologies & Models
 
@@ -47,7 +47,7 @@ Visual Content Processing	Computer Vision models (for analyzing webpage images/i
 
 
 
-⸻
+---
 
 🔹 Challenges & Considerations
 
@@ -57,7 +57,7 @@ Visual Content Processing	Computer Vision models (for analyzing webpage images/i
 🚧 Real-Time Performance: Ensuring fast response times for voice interactions and AI-generated summaries.
 🚧 Security & Privacy: Protecting user data, especially voice recordings and browsing history.
 
-⸻
+---
 
 🔹 Next Steps & Development Timeline
 
@@ -76,7 +76,7 @@ Visual Content Processing	Computer Vision models (for analyzing webpage images/i
 	•	✅ Enhance speech recognition accuracy and command flexibility.
 	•	✅ Optimize AI models for faster response times.
 
-⸻
+---
 
 🔹 Future Enhancements
 
@@ -85,7 +85,7 @@ Visual Content Processing	Computer Vision models (for analyzing webpage images/i
 🔹 Advanced Image Recognition (Using computer vision to describe images on webpages).
 🔹 Personalized AI Recommendations (AI learns user preferences and suggests relevant content).
 
-⸻
+---
 
 🚀 Final Goal
 
