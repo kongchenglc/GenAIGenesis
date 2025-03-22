@@ -1,4 +1,4 @@
-# 🔹 Browser Agent for the Visually Impaired (Chrome Extension)
+# 🔹 InSight: Browser Agent for the Visually Impaired (Chrome Extension)
 
 ## 📌 Motivation
 

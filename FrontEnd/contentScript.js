@@ -13,9 +13,9 @@ class VoiceAssistant {
       stopPhrases: ["goodbye assistant", "bye assistant"],
       recordingTimeout: 10000, // 10 seconds max recording
       audioFeedbackEnabled: true,
-      spaceKeyEnabled: true, // 启用空格键控制
-      longPressThreshold: 500, // 长按空格键的时间阈值（毫秒）
-      showSpaceKeyHint: true // 显示空格键提示
+      spaceKeyEnabled: true, // Enable space key control
+      longPressThreshold: 500, // Long press threshold in milliseconds
+      showSpaceKeyHint: true // Show space key hint
     };
 
     // State management
@@ -171,7 +171,7 @@ class VoiceAssistant {
       }
     });
 
-    // 添加空格键长按监听
+    // Add space key long press listener
     if (this.config.spaceKeyEnabled) {
       document.addEventListener('keydown', this.handleKeyDown);
       document.addEventListener('keyup', this.handleKeyUp);
@@ -182,23 +182,23 @@ class VoiceAssistant {
    * Handle key down event (for space key)
    */
   handleKeyDown(event) {
-    // 检查是否为空格键且不在输入框中
+    // Check if it's the space key and not in an input field
     if (event.code === 'Space' && 
         !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
-      // 阻止页面滚动默认行为
+      // Prevent default scroll behavior
       event.preventDefault();
       
-      // 如果未按下空格或定时器未设置
+      // If space not pressed or timer not set
       if (!this.state.spaceKeyDown && this.state.longPressTimer === null) {
         this.state.spaceKeyDown = true;
         this.updateFeedbackText("Hold for voice control...", true);
         
-        // 添加空格键按下的视觉效果
+        // Add visual feedback for space key press
         this.ui.assistantContainer.classList.add('space-pressed');
         
-        // 设置长按检测定时器
+        // Set long press detection timer
         this.state.longPressTimer = setTimeout(() => {
-          // 长按触发，激活助手
+          // Long press triggered, activate assistant
           this.updateFeedbackText("Assistant activated by space key. Speak now...", true);
           this.activate();
         }, this.config.longPressThreshold);
@@ -211,19 +211,19 @@ class VoiceAssistant {
    */
   handleKeyUp(event) {
     if (event.code === 'Space') {
-      // 重置空格键状态
+      // Reset space key state
       this.state.spaceKeyDown = false;
       
-      // 移除空格键按下的视觉效果
+      // Remove visual feedback for space key press
       this.ui.assistantContainer.classList.remove('space-pressed');
       
-      // 清除定时器
+      // Clear timer
       if (this.state.longPressTimer) {
         clearTimeout(this.state.longPressTimer);
         this.state.longPressTimer = null;
       }
       
-      // 如果助手已激活，则停止录音
+      // If assistant is activated, deactivate it
       if (this.state.isActivated) {
         this.deactivate();
       } else {
