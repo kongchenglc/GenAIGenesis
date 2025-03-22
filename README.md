@@ -1,4 +1,4 @@
-# 🔹 InSight: Browser Agent for the Visually Impaired (Chrome Extension)
+# InSight: Browser Agent for the Visually Impaired (Chrome Extension)
 
 ## 📌 Motivation
 
@@ -45,6 +45,7 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 
 | Component                        | Technology / Model                                          |
 | -------------------------------- | ----------------------------------------------------------- |
+| **AI Browser Agent**             | Gemini Model given external tools                           |
 | **Speech-to-Text (STT)**         | Web Speech API or Google Cloud Speech-to-Text               |
 | **Text-to-Speech (TTS)**         | Web Speech Synthesis API                                    |
 | **AI Summarization**             | OpenAI GPT-4 or LLaMA for text processing                   |
