@@ -274,6 +274,7 @@ Title: {content.title}
 Main Headings: {' | '.join(content.main_headings)}
 Brief Content: {content.quick_summary[:300]}
 
+
 Provide a clear, concise 1-2 sentence summary of what this webpage is about. Focus on the main purpose and content. Do not ask for more information or make requests."""
 
     async def quick_summarize(self, url: str) -> Tuple[str, Dict[str, str]]:
@@ -525,8 +526,14 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
                 )
 
         # Add navigation options to summary if they exist
-        if current_nav_options and not current_summary.endswith("page"):  # Avoid duplicate navigation options
-            current_summary += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
+
+        if current_nav_options and "summary" in current_summary:
+            if not current_summary["summary"].endswith("page"):  # Avoid duplicate navigation options
+                # current_summary["summary"] += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
+
+
+                sections = list(current_nav_options.keys())[:5]
+                current_summary["summary"] += f"\n\nSome sections: {' • '.join(sections)}{' • ' if len(current_nav_options) > 5 else ''}"
 
         return {"summary": current_summary}, new_url
 
@@ -554,6 +561,7 @@ async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[str,
         if not is_url(url):
             print("Error couldn't find a valid site")
             return "Could not find a valid website", "", True
+
             
         # Use agent_response to get the initial summary
         summary_dict, new_url = await agent_response(summarizer, url)

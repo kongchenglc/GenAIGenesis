@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Voice Recorder</title>
+    <script src="lib/assemblyai.js"></script>
+    <style>
+      button {
+        padding: 10px 20px;
+        margin: 10px;
+        font-size: 16px;
+      }
+      #transcript {
+        margin: 20px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        min-height: 100px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Voice Recorder</h2>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+    <div id="transcript">Ready to record...</div>
+    <script src="recorder.js"></script>
+  </body>
+</html>

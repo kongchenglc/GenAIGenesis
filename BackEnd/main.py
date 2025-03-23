@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from BackEnd.utils.websocketUtil import router as websocket_router
+from backend.utils.websocketUtil import router as websocket_router
 
 app = FastAPI()
 
