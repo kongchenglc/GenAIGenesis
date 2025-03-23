@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PIL import Image
 from io import BytesIO
 import json
-from summarize import agent_response, FastWebSummarizer, generate_nav_options
+from summarize import agent_response, FastWebSummarizer, find_website
 
 
 router = APIRouter()
@@ -11,21 +11,22 @@ async def websocket_endpoint(websocket: WebSocket):
     isOnStartup = True
     await websocket.accept()
     summarizer = None
-    
+
     try:
+        summarizer = FastWebSummarizer()
+        await summarizer.start_browser()
         while True:
             data = await websocket.receive_json()
             if isOnStartup:
                 if "text" in data:
                     text_message = data["text"]
-                    #insert api call
-
-                    API_response = {
-                        "summary": "Hello",
-                        "url": "https://www.google.com",
-                        "isStartup" : False
+                    summary, url, onStartup = await find_website(text_message, summarizer)
+                    API_response = {    
+                        "summary": summary,
+                        "url": url,
+                        "onStartup": onStartup
                     }
-                    if not API_response["isStartup"]:
+                    if not API_response["onStartup"]:
                         isOnStartup = False
                         JSON_response = {
                             "summary": API_response["summary"],
@@ -49,7 +50,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     text_response, url = await agent_response(summarizer, text_message)
                     API_response = {
-                        "summary": text_response,
+                        "summary": text_response["summary"],
                         "url": url
                     }
                     await websocket.send_json(API_response) 
@@ -75,7 +76,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     text_response, url = await agent_response(summarizer, URL_message)
                     API_response = {
-                        "summary": text_response,
+                        "summary": text_response["summary"],
                         "url": url
                     }
                     await websocket.send_json(API_response)
