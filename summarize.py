@@ -272,7 +272,7 @@ Title: {content.title}
 Main Headings: {' | '.join(content.main_headings)}
 Brief Content: {content.quick_summary[:300]}
 
-Provide a 1-2 sentence summary focused on the specific content of this page."""
+Provide a concise 1-2 sentence summary (no more than 50 words) focused on the specific content of this page."""
 
     async def quick_summarize(self, url: str) -> Tuple[Dict, Dict[str, str]]:
         """Fast summarization method"""
@@ -461,7 +461,12 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
         # Add navigation options to summary if they exist
         if current_nav_options and "summary" in current_summary:
             if not current_summary["summary"].endswith("page"):  # Avoid duplicate navigation options
-                current_summary["summary"] += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
+                # current_summary["summary"] += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
+
+
+                sections = list(current_nav_options.keys())[:5]
+                current_summary["summary"] += f"\n\nSome sections: {' • '.join(sections)}{' • ' if len(current_nav_options) > 5 else ''}"
+
 
         return current_summary, new_url
 

@@ -33,6 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "url": API_response["url"]
                         }
                         await websocket.send_json(JSON_response)
+                        continue
                     else:
                         await websocket.send_json(
                             {
