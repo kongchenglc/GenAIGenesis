@@ -86,7 +86,7 @@ class FastWebSummarizer:
             # First get the raw information
             response = self.model.generate_content([
                 f"Webpage content:\n{context}",
-                f"User query: {prompt}\n\nBased on the above content, extract and summarize the relevant information about what the user asked. If no relevant information is found, say so clearly."
+                f"User query: {prompt}\n\nBased on the above content, extract and summarize in 1-2 sentencesthe relevant information about what the user asked. If no relevant information is found, say so clearly."
             ])
             raw_info = response.text
 
