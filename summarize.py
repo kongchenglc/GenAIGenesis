@@ -11,7 +11,7 @@ import asyncio
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import argparse
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from dotenv import load_dotenv
 import traceback
 
@@ -399,8 +399,17 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def agent_response(summarizer: FastWebSummarizer, initial_url: str, user_input: str):
-    new_url = initial_url
+def is_url(string):
+    parsed = urlparse(string)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+async def agent_response(summarizer: FastWebSummarizer, user_input: str):
+    if is_url(user_input):
+        new_url = user_input
+        matched_option = 
+    else:
+        matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
+
     current_summary = None
     current_nav_options = None
 
@@ -411,7 +420,6 @@ async def agent_response(summarizer: FastWebSummarizer, initial_url: str, user_i
     if not current_nav_options:
         current_summary["summary"] += "\nLooks like we've reached a page without any navigation options."
         
-    matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
     
     if matched_option == 'EXIT':
         current_summary["summary"] += "\nAlright, hope that was helpful!"
