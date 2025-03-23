@@ -401,7 +401,7 @@ Only return the matching text or "none", nothing else."""
 
 def is_url(string):
     parsed = urlparse(string)
-    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    return parsed.scheme in ("http", "https", "www") and bool(parsed.netloc)
 
 async def agent_response(summarizer: FastWebSummarizer, user_input: str):
     new_url = None
@@ -476,14 +476,16 @@ async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict
     try:
         # Use Gemini to find a relevant website
         gemini_prompt = f"""Find a relevant website URL for this prompt: {prompt}
-        Return ONLY the URL, nothing else. The URL should be a direct link to the most relevant page."""
+        Return ONLY the URL, nothing else. The URL should be a direct link to the most relevant page.
+        If you can not find the URL return 'error!'"""
         
         response = summarizer.model.generate_content(gemini_prompt)
         url = response.text.strip()
         
         # Validate URL
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
+        if not is_url(url):
+            print('Error in find_website')
+            return {"summary": "Error"}, "", True
             
         # Use agent_response to get the initial summary
         summary, new_url = await agent_response(summarizer, url)
