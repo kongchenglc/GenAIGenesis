@@ -56,6 +56,7 @@ class FastWebSummarizer:
         self.model = genai.GenerativeModel('models/gemini-2.0-flash-lite')
         self.browser = None
         self.current_page = None
+        self.link_history = []
 
     async def start_browser(self):
         """Start a fast browser session"""
@@ -319,11 +320,11 @@ def display_quick_summary(summary: Dict, links: Dict[str, str]):
             break
     
     if nav_options:
-        print("I can help you in two ways:")
-        print("1. Navigate to a section: " + ", ".join(nav_options.keys()))
-        print("2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')")
+        print("I can help you either ")
+        print("navigate to a section: " + ", ".join(nav_options.keys()))
+        print(", or help you get specific information on the page.")
     
-    print("\nJust tell me what you'd like to do!")
+    print("\nJust tell me what you'd like to do or know!")
 
     return summary, nav_options
 
@@ -347,16 +348,16 @@ def generate_nav_options(links: Dict[str, str]):
     
     return nav_options
 
-def agent_response(summary: Dict, nav_options):
-    text_response = summary['summary'] 
+# def agent_response(summary: Dict, nav_options):
+#     text_response = summary['summary'] 
 
-    if nav_options:
-        text_response += f"\nI can take you to any of these sections: {', '.join(nav_options.keys())}."
+#     if nav_options:
+#         text_response += f"\nI can take you to any of these sections: {', '.join(nav_options.keys())}."
 
-    else:
-        text_response += "\nJust tell me where you'd like to go!"
+#     else:
+#         text_response += "\nJust tell me where you'd like to go!"
     
-    return text_response, nav_options
+#     return text_response, nav_options
 
 
 def _match_user_intent(user_input: str, available_options: Dict[str, str], model) -> Optional[str]:
@@ -402,14 +403,67 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
-    current_url = initial_url
+async def agent_response(summarizer: FastWebSummarizer, initial_url: str):
+    new_url = initial_url
     current_summary = None
     current_nav_options = None
 
+    if not current_summary:  # Only get new summary if we don't have one
+            summary, links = await summarizer.quick_summarize(new_url)
+            current_summary, current_nav_options = display_quick_summary(summary, links)
+        
+    if not current_nav_options:
+        current_summary += "\nLooks like we've reached a page without any navigation options."
+        
+    user_input = input().strip()
+    matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
+    
+    if matched_option == 'EXIT':
+        current_summary +="\nAlright, hope that was helpful!"
+    elif matched_option == 'BACK':
+        current_summary +="\nGoing back to the previous page..."
+        new_url = summarizer.link_history[-1]
+        current_summary = None  # Reset summary for next pag
+    elif matched_option == 'INFO_REQUEST':
+        current_summary = {"text": ""}
+        current_summary["text"] += "\nLet me search for that information..."
+        specific_info = await summarizer.get_specific_info(new_url, user_input)
+        current_summary["summary"] = specific_info
+        current_summary["text"] += "\n" + "="*80 + "\n"
+        current_summary["text"] += f"{specific_info}\n"
+        current_summary["text"] += "I can help you in two ways:\n"
+        current_summary["text"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
+        current_summary["text"] += "2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')\n"
+        current_summary["text"] += "\nJust tell me what you'd like to do!"
+        
+    elif matched_option:
+        if "text" not in current_summary:
+            current_summary["text"] = ""
+        current_summary["text"] += f"\nTaking you to {matched_option}..."
+        new_url = current_nav_options[matched_option]
+        current_summary["summary"] = None  # Reset summary for next page
+        current_summary["text"] = "Going to new URL!"
+
+    else:
+        if "text" not in current_summary:
+            current_summary["text"] = ""
+        current_summary["text"] += "\nI'm not sure what you want to do. You can:\n"
+        current_summary["text"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
+        current_summary["text"] += "2. Ask for specific information on this page"
+
+    
+    return current_summary, new_url
+            
+
+async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
+    new_url = initial_url
+    current_summary = None
+    current_nav_options = None
+    
+
     while True:
         if not current_summary:  # Only get new summary if we don't have one
-            summary, links = await summarizer.quick_summarize(current_url)
+            summary, links = await summarizer.quick_summarize(new_url)
             current_summary, current_nav_options = display_quick_summary(summary, links)
         
         if not current_nav_options:
@@ -427,7 +481,7 @@ async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
             break
         elif matched_option == 'INFO_REQUEST':
             print("\nLet me search for that information...")
-            specific_info = await summarizer.get_specific_info(current_url, user_input)
+            specific_info = await summarizer.get_specific_info(new_url, user_input)
             # Replace the current summary with the specific information
             current_summary = {"summary": specific_info}
             print("\n" + "="*80 + "\n")
@@ -438,7 +492,7 @@ async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
             print("\nJust tell me what you'd like to do!")
         elif matched_option:
             print(f"\nTaking you to {matched_option}...")
-            current_url = current_nav_options[matched_option]
+            new_url = current_nav_options[matched_option]
             current_summary = None  # Reset summary for next page
         else:
             print("\nI'm not sure what you want to do. You can:")

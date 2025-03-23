@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PIL import Image
 from io import BytesIO
 import json
-from summarize import agent_response, FastWebSummarizer, generate_nav_options
+from summarize import FastWebSummarizer, agent_response
 
 
 router = APIRouter()
@@ -37,12 +37,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 URL_message = data["URL"]
                 try:
                     summarizer = FastWebSummarizer()
-                    summary, links = await summarizer.quick_summarize(URL_message)
-                    navigation_summarize= generate_nav_options(links)
-                    text_response, nav_options = agent_response(summary, navigation_summarize)
+                    text_response, goto_url = agent_response(summarizer, URL_message)
                     API_response = {
                         "summary": text_response,
-                        "options": nav_options
+                        "url": goto_url
                     }
                     await websocket.send_json(API_response)
                     await summarizer.close()
