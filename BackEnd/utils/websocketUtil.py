@@ -4,9 +4,7 @@ from io import BytesIO
 import json
 from summarize import agent_response, FastWebSummarizer, find_website
 
-
 router = APIRouter()
-
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -32,7 +30,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         isOnStartup = False
                         JSON_response = {
                             "summary": API_response["summary"],
-                            "url": API_response["url"],
+                            "url": API_response["url"]
                         }
                         await websocket.send_json(JSON_response)
                     else:

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Voice Recorder to AssemblyAI</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 10px;
+        width: 300px;
+      }
+      button {
+        margin: 5px 5px 0 0;
+        padding: 8px 12px;
+      }
+      #transcript {
+        margin-top: 15px;
+        white-space: pre-wrap;
+        border: 1px solid #ccc;
+        padding: 8px;
+        min-height: 100px;
+        background: #f9f9f9;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Record &amp; Transcribe</h1>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+    <div id="transcript">Transcript will appear here...</div>
+
+    <!-- Load popup.js as a module for Manifest V3 -->
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
