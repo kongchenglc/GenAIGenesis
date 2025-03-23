@@ -290,43 +290,39 @@ Provide a 1-2 sentence summary focused on the specific content of this page."""
             await self.browser.close()
 
 
-def display_quick_summary(summary: Dict, links: Dict[str, str]):
-    """Display a conversational summary and navigation options"""
-    # Clear any previous output for cleaner display
-    print("\n" + "="*80 + "\n")
-    
-    # Show the summary naturally
-    print(f"{summary['summary']}\n")
+def format_summary(summary: Dict, links: Dict[str, str]) -> Tuple[Dict, Dict[str, str]]:
+    """Format summary and navigation options into a response"""
+    # Format the response text
+    response_text = f"{summary['summary']}\n"
     
     if not links:
-        print("I don't see any navigation options on this page.")
-        return
+        response_text += "\nI don't see any navigation options on this page."
+    else:
+        # Clean up navigation options
+        nav_options = {}  # text -> url mapping
         
-    # Clean up navigation options
-    nav_options = {}  # text -> url mapping
-    
-    for text, url in links.items():
-        # Clean up the text
-        text = text.strip().replace('\n', ' ').replace('  ', ' ')
-        
-        # Skip very short or duplicate-looking links
-        if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
-            continue
+        for text, url in links.items():
+            # Clean up the text
+            text = text.strip().replace('\n', ' ').replace('  ', ' ')
             
-        nav_options[text] = url
+            # Skip very short or duplicate-looking links
+            if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
+                continue
+                
+            nav_options[text] = url
+            
+            # Keep list manageable
+            if len(nav_options) >= 7:
+                break
         
-        # Keep list manageable
-        if len(nav_options) >= 7:
-            break
-    
-    if nav_options:
-        print("I can help you either ")
-        print("navigate to a section: " + ", ".join(nav_options.keys()))
-        print(", or help you get specific information on the page.")
-    
-    print("\nJust tell me what you'd like to do or know!")
+        if nav_options:
+            response_text += "\nI can help you either "
+            response_text += "navigate to a section: " + ", ".join(nav_options.keys())
+            response_text += ", or help you get specific information on the page."
+        
+        response_text += "\n\nJust tell me what you'd like to do or know!"
 
-    return summary, nav_options
+    return {"summary": response_text}, nav_options
 
 
 def generate_nav_options(links: Dict[str, str]):
@@ -403,103 +399,45 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def agent_response(summarizer: FastWebSummarizer, initial_url: str):
+async def agent_response(summarizer: FastWebSummarizer, initial_url: str, user_input: str):
     new_url = initial_url
     current_summary = None
     current_nav_options = None
 
     if not current_summary:  # Only get new summary if we don't have one
-            summary, links = await summarizer.quick_summarize(new_url)
-            current_summary, current_nav_options = display_quick_summary(summary, links)
-        
+        summary, links = await summarizer.quick_summarize(new_url)
+        current_summary, current_nav_options = format_summary(summary, links)
+    
     if not current_nav_options:
-        current_summary += "\nLooks like we've reached a page without any navigation options."
+        current_summary["summary"] += "\nLooks like we've reached a page without any navigation options."
         
-    user_input = input().strip()
     matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
     
     if matched_option == 'EXIT':
-        current_summary +="\nAlright, hope that was helpful!"
+        current_summary["summary"] += "\nAlright, hope that was helpful!"
     elif matched_option == 'BACK':
-        current_summary +="\nGoing back to the previous page..."
+        current_summary["summary"] += "\nGoing back to the previous page..."
         new_url = summarizer.link_history[-1]
-        current_summary = None  # Reset summary for next pag
+        current_summary = None  # Reset summary for next page
     elif matched_option == 'INFO_REQUEST':
-        current_summary = {"text": ""}
-        current_summary["text"] += "\nLet me search for that information..."
+        current_summary = {"summary": "\nLet me search for that information..."}
         specific_info = await summarizer.get_specific_info(new_url, user_input)
-        current_summary["summary"] = specific_info
-        current_summary["text"] += "\n" + "="*80 + "\n"
-        current_summary["text"] += f"{specific_info}\n"
-        current_summary["text"] += "I can help you in two ways:\n"
-        current_summary["text"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
-        current_summary["text"] += "2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')\n"
-        current_summary["text"] += "\nJust tell me what you'd like to do!"
+        current_summary["summary"] += f"\n{specific_info}\n"
+        current_summary["summary"] += "I can help you in two ways:\n"
+        current_summary["summary"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
+        current_summary["summary"] += "2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')\n"
+        current_summary["summary"] += "\nJust tell me what you'd like to do!"
         
     elif matched_option:
-        if "text" not in current_summary:
-            current_summary["text"] = ""
-        current_summary["text"] += f"\nTaking you to {matched_option}..."
+        current_summary["summary"] += f"\nTaking you to {matched_option}..."
         new_url = current_nav_options[matched_option]
-        current_summary["summary"] = None  # Reset summary for next page
-        current_summary["text"] = "Going to new URL!"
-
+        current_summary = None  # Reset summary for next page
     else:
-        if "text" not in current_summary:
-            current_summary["text"] = ""
-        current_summary["text"] += "\nI'm not sure what you want to do. You can:\n"
-        current_summary["text"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
-        current_summary["text"] += "2. Ask for specific information on this page"
+        current_summary["summary"] += "\nI'm not sure what you want to do. You can:\n"
+        current_summary["summary"] += "1. Navigate to a section: " + ", ".join(current_nav_options.keys()) + "\n"
+        current_summary["summary"] += "2. Ask for specific information on this page"
 
-    
     return current_summary, new_url
-            
-
-async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
-    new_url = initial_url
-    current_summary = None
-    current_nav_options = None
-    
-
-    while True:
-        if not current_summary:  # Only get new summary if we don't have one
-            summary, links = await summarizer.quick_summarize(new_url)
-            current_summary, current_nav_options = display_quick_summary(summary, links)
-        
-        if not current_nav_options:
-            print("\nLooks like we've reached a page without any navigation options.")
-            
-        user_input = input().strip()
-        matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
-        
-        if matched_option == 'EXIT':
-            print("\nAlright, hope that was helpful!")
-            break
-        elif matched_option == 'BACK':
-            print("\nGoing back to the previous page...")
-            current_summary = None  # Reset summary for next pag
-            break
-        elif matched_option == 'INFO_REQUEST':
-            print("\nLet me search for that information...")
-            specific_info = await summarizer.get_specific_info(new_url, user_input)
-            # Replace the current summary with the specific information
-            current_summary = {"summary": specific_info}
-            print("\n" + "="*80 + "\n")
-            print(f"{specific_info}\n")
-            print("I can help you in two ways:")
-            print("1. Navigate to a section: " + ", ".join(current_nav_options.keys()))
-            print("2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')")
-            print("\nJust tell me what you'd like to do!")
-        elif matched_option:
-            print(f"\nTaking you to {matched_option}...")
-            new_url = current_nav_options[matched_option]
-            current_summary = None  # Reset summary for next page
-        else:
-            print("\nI'm not sure what you want to do. You can:")
-            print("1. Navigate to a section:", ", ".join(current_nav_options.keys()))
-            print("2. Ask for specific information (e.g., 'Tell me about pricing')")
-            
-    await summarizer.close()
 
 async def main():
     parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
@@ -512,14 +450,38 @@ async def main():
     try:
         print("Initializing FastWebSummarizer...")
         summarizer = FastWebSummarizer(api_key=args.api_key)
-        print("Getting summary and links...")
-        summary, links = await summarizer.quick_summarize(args.url)
-        print("Generating navigation options...")
-        nav_options = generate_nav_options(links)
-        print("Generating agent response...")
-        text_response, nav_options = agent_output(summary, nav_options)
-        print("Starting interactive session...")
-        await url_to_print(summarizer, args.url)
+        
+        # Initialize state
+        current_url = args.url
+        summarizer.link_history = [current_url]  # Initialize with starting URL
+        
+        print("\nStarting interactive session (type 'exit' to quit)...")
+        while True:
+            # Get response from agent
+            response, new_url = await agent_response(summarizer, current_url, "")
+            
+            # Print response for testing (in real backend this would be sent to frontend)
+            print("\n" + "="*80)
+            print(response["summary"])
+            print("="*80 + "\n")
+            
+            # Get user input (in real backend this would come from websocket)
+            user_input = input("Your response: ").strip()
+            
+            # Check for exit
+            if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye', 'q', 'stop', 'end']:
+                print("\nEnding session...")
+                break
+                
+            # Process user input
+            response, new_url = await agent_response(summarizer, current_url, user_input)
+            
+            # Update URL if navigation occurred
+            if new_url != current_url:
+                current_url = new_url
+                if current_url not in summarizer.link_history:
+                    summarizer.link_history.append(current_url)
+                
     except KeyboardInterrupt:
         print("\n\nGot it, stopping now!")
     except Exception as e:
@@ -529,6 +491,7 @@ async def main():
     finally:
         if summarizer:
             await summarizer.close()
+            print("\nBrowser closed. Session ended.")
 
 if __name__ == "__main__":
     print("Script started")
