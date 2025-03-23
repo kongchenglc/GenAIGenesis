@@ -348,16 +348,16 @@ def generate_nav_options(links: Dict[str, str]):
     
     return nav_options
 
-# def agent_response(summary: Dict, nav_options):
-#     text_response = summary['summary'] 
+def agent_output(summary: Dict, nav_options):
+    text_response = summary['summary'] 
 
-#     if nav_options:
-#         text_response += f"\nI can take you to any of these sections: {', '.join(nav_options.keys())}."
+    if nav_options:
+        text_response += f"\nI can take you to any of these sections: {', '.join(nav_options.keys())}."
 
-#     else:
-#         text_response += "\nJust tell me where you'd like to go!"
+    else:
+        text_response += "\nJust tell me where you'd like to go!"
     
-#     return text_response, nav_options
+    return text_response, nav_options
 
 
 def _match_user_intent(user_input: str, available_options: Dict[str, str], model) -> Optional[str]:
@@ -517,7 +517,7 @@ async def main():
         print("Generating navigation options...")
         nav_options = generate_nav_options(links)
         print("Generating agent response...")
-        text_response, nav_options = agent_response(summary, nav_options)
+        text_response, nav_options = agent_output(summary, nav_options)
         print("Starting interactive session...")
         await url_to_print(summarizer, args.url)
     except KeyboardInterrupt:
