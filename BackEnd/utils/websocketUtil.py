@@ -9,49 +9,17 @@ router = APIRouter()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    summarizer = None
-    current_url = None
-    
     try:
+        summarizer = FastWebSummarizer()
         while True:
             data = await websocket.receive_json()
-            
-            if "URL" in data:
-                # Initial URL load
-                URL_message = data["URL"]
-                try:
-                    # Initialize summarizer if not exists
-                    if not summarizer:
-                        summarizer = FastWebSummarizer()
-                        current_url = URL_message
-                    
-                    # Get initial response
-                    response, new_url = await agent_response(summarizer, URL_message, "")
-                    API_response = {
-                        "summary": response["summary"],
-                        "url": new_url
-                    }
-                    await websocket.send_json(API_response)
-                except Exception as e:
-                    print("Error processing URL: ", e)
-                    await websocket.send_text("Error processing URL.")
-                    
-            elif "text" in data and summarizer and current_url:
-                # Handle user input
+            if "text" in data:
                 text_message = data["text"]
                 try:
-                    response, new_url = await agent_response(summarizer, current_url, text_message)
-                    current_url = new_url  # Update current URL if navigation occurred
-                    
-                    API_response = {
-                        "summary": response["summary"],
-                        "url": current_url
-                    }
-                    await websocket.send_json(API_response)
+                    await websocket.send_text("hi")
                 except Exception as e:
                     print("Error processing text:", e)
                     await websocket.send_text("Error processing text")
-                    
             elif "bytes" in data:
                 binary_message = data["bytes"]
                 try:
@@ -61,11 +29,23 @@ async def websocket_endpoint(websocket: WebSocket):
                         "summary": "Hello",
                         "elements": "World"
                     }
+                     #this custom data type will be filled by the API AI call
                     await websocket.send_json(API_response)
                 except Exception as e:
                     print("Error processing image: ", e)
                     await websocket.send_text("Error processing image")
-                    
+            elif "URL" in data:
+                URL_message = data["URL"]
+                try:
+                    text_response, url = agent_response(summarizer, URL_message)
+                    API_response = {
+                        "summary": text_response,
+                        "url": url
+                    }
+                    await websocket.send_json(API_response)
+                except Exception as e:
+                    print("Error processing HTML: ", e)
+                    await websocket.send_text("Error processing HTML.")         
     except WebSocketDisconnect:
         print("Client disconnected")
         if summarizer:
