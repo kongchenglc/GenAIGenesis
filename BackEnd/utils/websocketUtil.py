@@ -37,7 +37,7 @@ async def websocket_endpoint(websocket: WebSocket):
             elif "URL" in data:
                 URL_message = data["URL"]
                 try:
-                    text_response, url = agent_response(summarizer, URL_message)
+                    text_response, url = await agent_response(summarizer, URL_message)
                     API_response = {
                         "summary": text_response,
                         "url": url
