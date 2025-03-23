@@ -8,12 +8,41 @@ from summarize import agent_response, FastWebSummarizer, generate_nav_options
 router = APIRouter()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    isOnStartup = True
     await websocket.accept()
     try:
         summarizer = FastWebSummarizer()
         await summarizer.start_browser()
         while True:
             data = await websocket.receive_json()
+            if isOnStartup:
+                if "text" in data:
+                    text_message = data["text"]
+                    #insert api call
+                    API_response = {
+                        "summary": "Hello",
+                        "url": "https://www.google.com",
+                        "isStartup" : False
+                    }
+                    if not API_response["isStartup"]:
+                        isOnStartup = False
+                        JSON_response = {
+                            "summary": API_response["summary"],
+                            "url": API_response["url"]
+                        }
+                        await websocket.send_json(JSON_response)
+                    else:
+                        await websocket.send_json({
+                            "summary": "Please ask a valid request to search the web for",
+                            "url":None
+                        })
+                    continue
+                else:
+                    await websocket.send_json({
+                        "summary": "Please ask a valid request to search the web for",
+                        "url":None
+                    })
+                    continue
             if "text" in data:
                 text_message = data["text"]
                 try:
