@@ -418,38 +418,38 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
             current_nav_options = links
         else:
             # If not a URL, we're handling a command or query
-            if hasattr(summarizer, 'current_url') and summarizer.current_url:
-                new_url = summarizer.current_url
-                summary, links = await summarizer.quick_summarize(new_url)
-                current_summary = summary
-                current_nav_options = links
-                matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
 
-                if matched_option == 'EXIT':
-                    current_summary["summary"] = "Alright, hope that was helpful!"
-                elif matched_option == 'BACK':
-                    if len(summarizer.link_history) > 1:  # Use len() instead of .length
-                        current_summary["summary"] = "Going back to the previous page..."
-                        new_url = summarizer.link_history[-2]
-                    else:
-                        current_summary["summary"] = "You're already on the first page!"
-                elif matched_option == 'INFO_REQUEST':
-                    specific_info = await summarizer.get_specific_info(new_url, user_input)
-                    current_summary = {
-                        "summary": f"Here's what I found:\n{specific_info}\n\n"
-                        "I can help you in two ways:\n"
-                        f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
-                        "2. Ask another question about this page"
-                    }
-                elif matched_option:
-                    current_summary["summary"] = f"Taking you to {matched_option}..."
-                    new_url = current_nav_options[matched_option]
+            new_url = summarizer.link_history[-1]
+            summary, links = await summarizer.quick_summarize(new_url)
+            current_summary = summary
+            current_nav_options = links
+            matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
+
+            if matched_option == 'EXIT':
+                current_summary["summary"] = "Alright, hope that was helpful!"
+            elif matched_option == 'BACK':
+                if len(summarizer.link_history) > 1:  # Use len() instead of .length
+                    current_summary["summary"] = "Going back to the previous page..."
+                    new_url = summarizer.link_history[-2]
                 else:
-                    current_summary["summary"] = (
-                        "I'm not sure what you want to do. You can:\n"
-                        f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
-                        "2. Ask for specific information on this page"
-                    )
+                    current_summary["summary"] = "You're already on the first page!"
+            elif matched_option == 'INFO_REQUEST':
+                specific_info = await summarizer.get_specific_info(new_url, user_input)
+                current_summary = {
+                    "summary": f"Here's what I found:\n{specific_info}\n\n"
+                    "I can help you in two ways:\n"
+                    f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
+                    "2. Ask another question about this page"
+                }
+            elif matched_option:
+                current_summary["summary"] = f"Taking you to {matched_option}..."
+                new_url = current_nav_options[matched_option]
+            else:
+                current_summary["summary"] = (
+                    "I'm not sure what you want to do. You can:\n"
+                    f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
+                    "2. Ask for specific information on this page"
+                )
 
         # Add navigation options to summary if they exist
         if current_nav_options and "summary" in current_summary:

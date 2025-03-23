@@ -11,12 +11,18 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
         summarizer = FastWebSummarizer()
+        await summarizer.start_browser()
         while True:
             data = await websocket.receive_json()
             if "text" in data:
                 text_message = data["text"]
                 try:
-                    await websocket.send_text("hi")
+                    text_response, url = await agent_response(summarizer, text_message)
+                    API_response = {
+                        "summary": text_response,
+                        "url": url
+                    }
+                    await websocket.send_json(API_response) 
                 except Exception as e:
                     print("Error processing text:", e)
                     await websocket.send_text("Error processing text")
