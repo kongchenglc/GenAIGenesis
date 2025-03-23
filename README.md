@@ -45,11 +45,10 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 
 | Component                        | Technology / Model                                          |
 | -------------------------------- | ----------------------------------------------------------- |
-| **Speech-to-Text (STT)**         | Web Speech API or Google Cloud Speech-to-Text               |
+| **Speech-to-Text (STT)**         | Web Speech API                                              |
 | **Text-to-Speech (TTS)**         | Web Speech Synthesis API                                    |
-| **AI Summarization**             | OpenAI GPT-4 or LLaMA for text processing                   |
+| **AI Summarization**             | Gemini-2.0-flash-lite for text processing                   |
 | **Web Interaction & Navigation** | Chrome Extensions API (Tabs, Scripting)                     |
-| **Visual Content Processing**    | Computer Vision models (for analyzing webpage images/icons) |
 
 ---
 
@@ -60,28 +59,6 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 🚧 **Complex Web Structures**: Websites have **varied HTML structures**, making it challenging to extract **relevant content** (e.g., product descriptions, headlines, interactive elements).  
 🚧 **Real-Time Performance**: Ensuring **fast response times** for voice interactions and AI-generated summaries.  
 🚧 **Security & Privacy**: Protecting user data, especially **voice recordings and browsing history**.
-
----
-
-## 🔹 Development Roadmap
-
-### 🟢 Phase 1: Core Development (Weeks 1-2)
-
-✅ Set up **Chrome Extension framework** (`manifest.json`, `popup.js`, `background.js`).  
-✅ Implement **basic voice input & command execution** using Web Speech API.  
-✅ Develop **initial webpage content extraction & text-to-speech read-aloud**.
-
-### 🟡 Phase 2: AI Integration (Weeks 3-5)
-
-✅ Integrate **GPT-4/LLaMA** for intelligent summarization.  
-✅ Implement **tab management & smart memory** for frequently visited sites.  
-✅ Add **real-time notifications** for background monitoring.
-
-### 🟠 Phase 3: User Testing & Optimization (Weeks 6-8)
-
-✅ Conduct **blind user testing** to improve usability.  
-✅ Enhance **speech recognition accuracy** and command flexibility.  
-✅ Optimize **AI models** for **faster response times**.
 
 ---
 
