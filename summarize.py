@@ -50,27 +50,30 @@ class FastWebSummarizer:
         
         genai.configure(api_key=api_key)
         
+        
+        
         # Use gemini-2.0-flash-lite for all operations
         self.model = genai.GenerativeModel('models/gemini-2.0-flash-lite')
         self.browser = None
         self.current_page = None
         self.link_history = []
-        # Add cache for quick lookups
-        self.url_cache = {}  # url -> (summary, links) mapping
-        self._browser_started = False
 
     async def start_browser(self):
         """Start a fast browser session"""
-        if self._browser_started:
-            return
-            
         p = await async_playwright().start()
         self.browser = await p.chromium.launch(
             headless=True,
-            args=['--disable-javascript', '--disable-gpu', '--no-sandbox']  # Additional optimizations
+            args=[
+                '--disable-dev-shm-usage',  # Better memory handling
+                '--no-sandbox',  # Required for some environments
+                '--disable-setuid-sandbox'  # Required for some environments
+            ]
         )
         self.current_page = await self.browser.new_page()
-        self._browser_started = True
+        # Set a more realistic user agent
+        await self.current_page.set_extra_http_headers({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        })
 
     async def _safe_extract(self, coro: Any, timeout: float, default: Any = None) -> Any:
         """Safely extract content with timeout"""
@@ -183,28 +186,113 @@ Return only the cleaned up text, nothing else."""
             if not self.current_page:
                 await self.start_browser()
 
-            # Extract all content in parallel
-            title_task = self._safe_extract(
+            # Load page with a more reliable strategy
+            try:
+                # First try to load until DOM is ready
+                await self._safe_extract(
+                    self.current_page.goto(url, wait_until="domcontentloaded"),
+                    PAGE_LOAD_TIMEOUT
+                )
+            except Exception:
+                # If that fails, try loading without waiting
+                await self._safe_extract(
+                    self.current_page.goto(url, wait_until="commit"),
+                    PAGE_LOAD_TIMEOUT
+                )
+
+            # Wait a short time for dynamic content
+            await asyncio.sleep(1)
+
+            # Get title
+            title = await self._safe_extract(
                 self.current_page.title(),
                 CONTENT_TIMEOUT,
                 "Unknown Title"
             )
+
+            # Extract navigation links with more selectors
+            main_links = {}
+            nav_selectors = [
+                'nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]',
+                '.navbar a[href]', '.menu a[href]', '.navigation a[href]', '.header a[href]',
+                '[role="navigation"] a[href]', '.main-nav a[href]', '.site-nav a[href]'
+            ]
+            for selector in nav_selectors:
+                async def extract_link(element):
+                    text = await element.text_content()
+                    href = await element.get_attribute('href')
+                    return (text.strip(), href) if text and href and len(text.strip()) < 50 else None
+
+                links = await self._extract_elements(selector, extract_link)
+                for text, href in links[:MAX_LINKS]:
+                    if text and href:
+                        main_links[text] = urljoin(url, href)
+
+            # Extract headings with more selectors
+            async def extract_heading(element):
+                text = await element.text_content()
+                return text.strip() if text and text.strip() else None
+
+            heading_selectors = ['h1', 'h2', '.hero-title', '.page-title', '.section-title', '[role="heading"]']
+            main_headings = []
+            for selector in heading_selectors:
+                headings = await self._extract_elements(selector, extract_heading)
+                main_headings.extend(headings)
+            main_headings = main_headings[:MAX_HEADINGS]
+
+            # Extract content with improved selectors and JavaScript evaluation
+            content_selectors = [
+                'main', 'article', '#content', '.content',
+                '[role="main"]', '.main-content', '#main-content',
+                'section:first-of-type', '.page-content',
+                '[data-testid="content"]', '.hero', '.hero-content',
+                '.landing-content', '.app-content', '.site-content'
+            ]
             
-            # Extract links and headings in parallel
-            links_task = self._extract_links()
-            headings_task = self._extract_headings()
-            content_task = self._extract_main_content()
-            
-            # Wait for all extractions
-            title, links, headings, content = await asyncio.gather(
-                title_task, links_task, headings_task, content_task
-            )
+            quick_summary = ""
+            for selector in content_selectors:
+                if element := await self.current_page.query_selector(selector):
+                    text = await self._safe_extract(
+                        self.current_page.evaluate("""
+                            (el) => {
+                                const clone = el.cloneNode(true);
+                                // Remove navigation, headers, footers, and other non-content elements
+                                const removeSelectors = [
+                                    'nav', 'header', 'footer', '.nav', '.header', '.footer',
+                                    '.menu', '.sidebar', '.social-links', '.advertisement',
+                                    'script', 'style', 'iframe', 'noscript'
+                                ];
+                                removeSelectors.forEach(selector => {
+                                    const elements = clone.querySelectorAll(selector);
+                                    elements.forEach(e => e.remove());
+                                });
+                                return clone.textContent;
+                            }
+                        """, element),
+                        CONTENT_TIMEOUT
+                    )
+                    if text and len(text.strip()) > MIN_CONTENT_LENGTH:
+                        quick_summary = text.strip()[:MAX_SUMMARY_LENGTH]
+                        break
+
+            # Fallback to paragraphs if no content found
+            if not quick_summary:
+                async def extract_paragraph(element):
+                    text = await element.text_content()
+                    return text.strip() if text and len(text.strip()) > MIN_CONTENT_LENGTH else None
+
+                paragraph_selectors = ['p', '.paragraph', '.text-content', '.description', '.about-text']
+                paragraphs = []
+                for selector in paragraph_selectors:
+                    paras = await self._extract_elements(selector, extract_paragraph)
+                    paragraphs.extend(paras)
+                quick_summary = ' '.join(paragraphs[:3])[:MAX_SUMMARY_LENGTH]
 
             return QuickPageContent(
                 title=title,
-                main_links=links,
-                main_headings=headings,
-                quick_summary=content
+                main_links=main_links,
+                main_headings=main_headings,
+                quick_summary=quick_summary
             )
 
         except Exception as e:
@@ -215,129 +303,35 @@ Return only the cleaned up text, nothing else."""
                 main_headings=[],
                 quick_summary=""
             )
-
-    async def _extract_links(self) -> Dict[str, str]:
-        """Extract navigation links in parallel"""
-        main_links = {}
-        nav_selectors = ['nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]']
-        
-        async def extract_link(element):
-            text = await element.text_content()
-            href = await element.get_attribute('href')
-            return (text.strip(), href) if text and href and len(text.strip()) < 50 else None
-
-        # Extract links from all selectors in parallel
-        link_tasks = []
-        for selector in nav_selectors:
-            elements = await self.current_page.query_selector_all(selector)
-            for element in elements[:MAX_LINKS]:
-                link_tasks.append(self._safe_extract(extract_link(element), ELEMENT_TIMEOUT))
-
-        results = await asyncio.gather(*link_tasks)
-        for text, href in results:
-            if text and href:
-                main_links[text] = urljoin(self.current_page.url, href)
-
-        return main_links
-
-    async def _extract_headings(self) -> List[str]:
-        """Extract headings in parallel"""
-        async def extract_heading(element):
-            text = await element.text_content()
-            return text.strip() if text and text.strip() else None
-
-        elements = await self.current_page.query_selector_all('h1, h2')
-        heading_tasks = [self._safe_extract(extract_heading(element), ELEMENT_TIMEOUT) 
-                        for element in elements[:MAX_HEADINGS]]
-        
-        results = await asyncio.gather(*heading_tasks)
-        return [h for h in results if h]
-
-    async def _extract_main_content(self) -> str:
-        """Extract main content in parallel"""
-        content_selectors = [
-            'main', 'article', '#content', '.content',
-            '[role="main"]', '.main-content', '#main-content',
-            'section:first-of-type', '.page-content',
-            '[data-testid="content"]'
-        ]
-        
-        # Try all selectors in parallel
-        selector_tasks = []
-        for selector in content_selectors:
-            if element := await self.current_page.query_selector(selector):
-                selector_tasks.append(
-                    self._safe_extract(
-                        self.current_page.evaluate("""
-                            (el) => {
-                                const clone = el.cloneNode(true);
-                                const nav = clone.querySelector('nav, header, footer');
-                                if (nav) nav.remove();
-                                return clone.textContent;
-                            }
-                        """, element),
-                        CONTENT_TIMEOUT
-                    )
-                )
-
-        results = await asyncio.gather(*selector_tasks)
-        for text in results:
-            if text and len(text.strip()) > MIN_CONTENT_LENGTH:
-                return text.strip()[:MAX_SUMMARY_LENGTH]
-
-        # Fallback to paragraphs if no content found
-        async def extract_paragraph(element):
-            text = await element.text_content()
-            return text.strip() if text and len(text.strip()) > MIN_CONTENT_LENGTH else None
-
-        elements = await self.current_page.query_selector_all('p')
-        paragraph_tasks = [self._safe_extract(extract_paragraph(element), ELEMENT_TIMEOUT) 
-                          for element in elements[:3]]
-        
-        paragraphs = await asyncio.gather(*paragraph_tasks)
-        return ' '.join(p for p in paragraphs if p)[:MAX_SUMMARY_LENGTH]
+    
 
     def _build_quick_prompt(self, content: QuickPageContent) -> str:
         """Build a minimal prompt for fast processing"""
-        return f"""Quick webpage summary:
+        return f"""Given this webpage content:
 Title: {content.title}
 Main Headings: {' | '.join(content.main_headings)}
 Brief Content: {content.quick_summary[:300]}
 
-Provide a 1-2 sentence summary focused on the specific content of this page."""
+Provide a concise 1-2 sentence summary that:
+1. Focuses on the main purpose and content of the page
+2. Avoids technical details about HTML/CSS
+3. Highlights key features or information
+4. Is written in natural, conversational language
+5. Doesn't mention the webpage structure or formatting
+
+For example:
+- For a shopping site: "Zappos offers a wide selection of shoes with free shipping and returns, featuring detailed product photos and customer reviews."
+- For a job site: "Indeed provides job listings from companies worldwide with advanced search filters and direct application options."
+- For a learning platform: "FreeCodeCamp offers free programming tutorials and certifications in web development, with interactive coding challenges and projects."
+
+Return only the summary text, nothing else."""
 
     async def quick_summarize(self, url: str) -> Tuple[Dict, Dict[str, str]]:
-        """Fast summarization method with caching"""
+        """Fast summarization method"""
         try:
-            # Check cache first
-            if url in self.url_cache:
-                return self.url_cache[url]
-
-            if not self.current_page:
-                await self.start_browser()
-
-            # Start page load and content extraction in parallel
-            page_load = self._safe_extract(
-                self.current_page.goto(url, wait_until="domcontentloaded"),
-                PAGE_LOAD_TIMEOUT
-            )
-            
-            # Extract content while page is loading
-            content_task = asyncio.create_task(self.quick_extract(url))
-            
-            # Wait for both operations
-            await asyncio.gather(page_load, content_task)
-            content = content_task.result()
-            
-            # Generate summary
+            content = await self.quick_extract(url)
             response = self.model.generate_content(self._build_quick_prompt(content))
-            
-            result = {"summary": response.text}, content.main_links
-            
-            # Cache the result
-            self.url_cache[url] = result
-            return result
-            
+            return {"summary": response.text}, content.main_links
         except Exception as e:
             console.print(f"[yellow]Warning: {str(e)}[/yellow]")
             return {"summary": "Could not generate summary"}, {}
@@ -584,11 +578,11 @@ async def test_find_website():
         
         # Test cases
         test_prompts = [
-            "find me a site to buy shoes",
-            "where can I find job listings",
-            "show me a website for learning programming",
             "show me the uwaterloo website",
-            "show me the GenAI Genesis Hackathon official site"
+            "show me the GenAI Genesis Hackathon official site",
+            "show me a site for origami",
+            "show me harvard's website",
+            "show me a site to buy fridges"
         ]
         
         print("\nTesting find_and_summarize_website...")
@@ -616,15 +610,26 @@ async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict
     - onStartup: True if we need to keep searching, False if we found a valid site
     """
     try:
-        # Use Gemini to find a relevant website
+        # Use Gemini to find a relevant website with more specific examples
         url_prompt = f"""Given this user request: "{prompt}"
 
-Find a relevant website that would help with this request. For example:
-- "find me a site to find shoes" -> "https://www.zappos.com"
-- "where can I buy electronics" -> "https://www.bestbuy.com"
-- "I need a job" -> "https://www.linkedin.com"
+Find the most relevant and specific website URL that would help with this request. For example:
+- "find me a site to buy shoes" -> "https://www.nike.com"
+- "where can I find job listings" -> "https://www.linkedin.com/jobs"
+- "show me a website for learning programming" -> "https://www.codecademy.com"
+- "show me the uwaterloo website" -> "https://uwaterloo.ca"
+- "show me the GenAI Genesis official site" -> "https://genaigenesis.ca"
 
-Return ONLY the URL, nothing else. If no relevant site can be determined, return "none"."""
+Important rules:
+1. Return ONLY the URL, nothing else
+2. Just return the most specific and relevant URL (e.g., /jobs for job sites)
+3. For universities, use the main domain
+4. For hackathons/events, use the official event URL
+5. If no relevant site can be determined, return "none"
+6. Never return blocked or inaccessible sites
+7. For shopping, prefer specialized retailers over general marketplaces
+
+Return ONLY the URL, nothing else."""
 
         response = summarizer.model.generate_content(url_prompt)
         url = response.text.strip().strip('"').strip("'")
@@ -637,8 +642,10 @@ Return ONLY the URL, nothing else. If no relevant site can be determined, return
             
         # If we found a valid URL, try to summarize it
         try:
+            # Use the existing quick_summarize method which is already working well
             summary, _ = await summarizer.quick_summarize(url)
             return summary, url, False
+            
         except Exception as e:
             print(f"Error during summarization: {e}")  # Add logging for debugging
             return {

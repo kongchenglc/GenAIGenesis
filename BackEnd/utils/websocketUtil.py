@@ -11,7 +11,6 @@ async def websocket_endpoint(websocket: WebSocket):
     isOnStartup = True
     await websocket.accept()
     summarizer = None
-    current_url = None
     
     try:
         while True:
@@ -20,6 +19,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if "text" in data:
                     text_message = data["text"]
                     #insert api call
+
                     API_response = {
                         "summary": "Hello",
                         "url": "https://www.google.com",
