@@ -444,6 +444,7 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
             elif matched_option:
                 current_summary["summary"] = f"Taking you to {matched_option}..."
                 new_url = current_nav_options[matched_option]
+                summarizer.link_history.append(new_url)
             else:
                 current_summary["summary"] = (
                     "I'm not sure what you want to do. You can:\n"
