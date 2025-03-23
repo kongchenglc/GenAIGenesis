@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PIL import Image
 from io import BytesIO
 import json
-from summarize import FastWebSummarizer, agent_response
+from summarize import agent_response, FastWebSummarizer, generate_nav_options
 
 
 router = APIRouter()
@@ -10,6 +10,7 @@ router = APIRouter()
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     try:
+        summarizer = FastWebSummarizer()
         while True:
             data = await websocket.receive_json()
             if "text" in data:
@@ -36,16 +37,22 @@ async def websocket_endpoint(websocket: WebSocket):
             elif "URL" in data:
                 URL_message = data["URL"]
                 try:
-                    summarizer = FastWebSummarizer()
-                    text_response, goto_url = agent_response(summarizer, URL_message)
+                    summary, links = await summarizer.quick_summarize(URL_message)
+                    navigation_summarize= generate_nav_options(links)
+                    text_response, nav_options = agent_response(summary, navigation_summarize)
                     API_response = {
                         "summary": text_response,
-                        "url": goto_url
+                        "options": nav_options
                     }
                     await websocket.send_json(API_response)
-                    await summarizer.close()
                 except Exception as e:
                     print("Error processing HTML: ", e)
                     await websocket.send_text("Error processing HTML.")         
     except WebSocketDisconnect:
         print("Client disconnected")
+        if summarizer:
+            await summarizer.close()
+    except Exception as e:
+        print("Error: ", e)
+        if summarizer:
+            await summarizer.close()
