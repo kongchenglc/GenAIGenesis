@@ -418,8 +418,6 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
             current_nav_options = links
         else:
             # If not a URL, we're handling a command or query
-
-            
             new_url = summarizer.link_history[-1]
             summary, links = await summarizer.quick_summarize(new_url)
             current_summary = summary
@@ -429,9 +427,13 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
             if matched_option == 'EXIT':
                 current_summary["summary"] = "Alright, hope that was helpful!"
             elif matched_option == 'BACK':
-                if len(summarizer.link_history) > 1:  # Use len() instead of .length
+                if len(summarizer.link_history) > 1:
+                    previous_url = summarizer.link_history[-2]
                     current_summary["summary"] = "Going back to the previous page..."
-                    new_url = summarizer.link_history[-2]
+                    new_url = previous_url
+                    summary, links = await summarizer.quick_summarize(previous_url)
+                    current_summary = summary
+                    current_nav_options = links
                 else:
                     current_summary["summary"] = "You're already on the first page!"
             elif matched_option == 'INFO_REQUEST':
@@ -446,6 +448,9 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
                 current_summary["summary"] = f"Taking you to {matched_option}..."
                 new_url = current_nav_options[matched_option]
                 summarizer.link_history.append(new_url)
+                summary, links = await summarizer.quick_summarize(new_url)
+                current_summary = summary
+                current_nav_options = links
             else:
                 current_summary["summary"] = (
                     "I'm not sure what you want to do. You can:\n"
