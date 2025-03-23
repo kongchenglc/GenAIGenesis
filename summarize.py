@@ -50,7 +50,7 @@ class FastWebSummarizer:
         
         genai.configure(api_key=api_key)
         
-        
+
         
         # Use gemini-2.0-flash-lite for all operations
         self.model = genai.GenerativeModel('models/gemini-2.0-flash-lite')
@@ -63,17 +63,9 @@ class FastWebSummarizer:
         p = await async_playwright().start()
         self.browser = await p.chromium.launch(
             headless=True,
-            args=[
-                '--disable-dev-shm-usage',  # Better memory handling
-                '--no-sandbox',  # Required for some environments
-                '--disable-setuid-sandbox'  # Required for some environments
-            ]
+            args=['--disable-javascript']  # Disable JS for faster loading
         )
         self.current_page = await self.browser.new_page()
-        # Set a more realistic user agent
-        await self.current_page.set_extra_http_headers({
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        })
 
     async def _safe_extract(self, coro: Any, timeout: float, default: Any = None) -> Any:
         """Safely extract content with timeout"""
@@ -186,22 +178,11 @@ Return only the cleaned up text, nothing else."""
             if not self.current_page:
                 await self.start_browser()
 
-            # Load page with a more reliable strategy
-            try:
-                # First try to load until DOM is ready
-                await self._safe_extract(
-                    self.current_page.goto(url, wait_until="domcontentloaded"),
-                    PAGE_LOAD_TIMEOUT
-                )
-            except Exception:
-                # If that fails, try loading without waiting
-                await self._safe_extract(
-                    self.current_page.goto(url, wait_until="commit"),
-                    PAGE_LOAD_TIMEOUT
-                )
-
-            # Wait a short time for dynamic content
-            await asyncio.sleep(1)
+            # Load page
+            await self._safe_extract(
+                self.current_page.goto(url, wait_until="domcontentloaded"),
+                PAGE_LOAD_TIMEOUT
+            )
 
             # Get title
             title = await self._safe_extract(
@@ -210,13 +191,9 @@ Return only the cleaned up text, nothing else."""
                 "Unknown Title"
             )
 
-            # Extract navigation links with more selectors
+            # Extract navigation links
             main_links = {}
-            nav_selectors = [
-                'nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]',
-                '.navbar a[href]', '.menu a[href]', '.navigation a[href]', '.header a[href]',
-                '[role="navigation"] a[href]', '.main-nav a[href]', '.site-nav a[href]'
-            ]
+            nav_selectors = ['nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]']
             for selector in nav_selectors:
                 async def extract_link(element):
                     text = await element.text_content()
@@ -228,25 +205,20 @@ Return only the cleaned up text, nothing else."""
                     if text and href:
                         main_links[text] = urljoin(url, href)
 
-            # Extract headings with more selectors
+            # Extract headings
             async def extract_heading(element):
                 text = await element.text_content()
                 return text.strip() if text and text.strip() else None
 
-            heading_selectors = ['h1', 'h2', '.hero-title', '.page-title', '.section-title', '[role="heading"]']
-            main_headings = []
-            for selector in heading_selectors:
-                headings = await self._extract_elements(selector, extract_heading)
-                main_headings.extend(headings)
+            main_headings = await self._extract_elements('h1, h2', extract_heading)
             main_headings = main_headings[:MAX_HEADINGS]
 
-            # Extract content with improved selectors and JavaScript evaluation
+            # Extract content
             content_selectors = [
                 'main', 'article', '#content', '.content',
                 '[role="main"]', '.main-content', '#main-content',
                 'section:first-of-type', '.page-content',
-                '[data-testid="content"]', '.hero', '.hero-content',
-                '.landing-content', '.app-content', '.site-content'
+                '[data-testid="content"]'
             ]
             
             quick_summary = ""
@@ -256,16 +228,8 @@ Return only the cleaned up text, nothing else."""
                         self.current_page.evaluate("""
                             (el) => {
                                 const clone = el.cloneNode(true);
-                                // Remove navigation, headers, footers, and other non-content elements
-                                const removeSelectors = [
-                                    'nav', 'header', 'footer', '.nav', '.header', '.footer',
-                                    '.menu', '.sidebar', '.social-links', '.advertisement',
-                                    'script', 'style', 'iframe', 'noscript'
-                                ];
-                                removeSelectors.forEach(selector => {
-                                    const elements = clone.querySelectorAll(selector);
-                                    elements.forEach(e => e.remove());
-                                });
+                                const nav = clone.querySelector('nav, header, footer');
+                                if (nav) nav.remove();
                                 return clone.textContent;
                             }
                         """, element),
@@ -281,11 +245,7 @@ Return only the cleaned up text, nothing else."""
                     text = await element.text_content()
                     return text.strip() if text and len(text.strip()) > MIN_CONTENT_LENGTH else None
 
-                paragraph_selectors = ['p', '.paragraph', '.text-content', '.description', '.about-text']
-                paragraphs = []
-                for selector in paragraph_selectors:
-                    paras = await self._extract_elements(selector, extract_paragraph)
-                    paragraphs.extend(paras)
+                paragraphs = await self._extract_elements('p', extract_paragraph)
                 quick_summary = ' '.join(paragraphs[:3])[:MAX_SUMMARY_LENGTH]
 
             return QuickPageContent(
@@ -307,24 +267,12 @@ Return only the cleaned up text, nothing else."""
 
     def _build_quick_prompt(self, content: QuickPageContent) -> str:
         """Build a minimal prompt for fast processing"""
-        return f"""Given this webpage content:
+        return f"""Quick webpage summary:
 Title: {content.title}
 Main Headings: {' | '.join(content.main_headings)}
 Brief Content: {content.quick_summary[:300]}
 
-Provide a concise 1-2 sentence summary that:
-1. Focuses on the main purpose and content of the page
-2. Avoids technical details about HTML/CSS
-3. Highlights key features or information
-4. Is written in natural, conversational language
-5. Doesn't mention the webpage structure or formatting
-
-For example:
-- For a shopping site: "Zappos offers a wide selection of shoes with free shipping and returns, featuring detailed product photos and customer reviews."
-- For a job site: "Indeed provides job listings from companies worldwide with advanced search filters and direct application options."
-- For a learning platform: "FreeCodeCamp offers free programming tutorials and certifications in web development, with interactive coding challenges and projects."
-
-Return only the summary text, nothing else."""
+Provide a 1-2 sentence summary focused on the specific content of this page."""
 
     async def quick_summarize(self, url: str) -> Tuple[Dict, Dict[str, str]]:
         """Fast summarization method"""
@@ -515,92 +463,7 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
         print(f"Error in agent_response: {e}")
         return {"summary": "Sorry, I encountered an error processing your request."}, None
 
-# async def main():
-#     parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
-#     parser.add_argument("url", help="URL of the webpage to summarize")
-#     parser.add_argument("--api-key", help="Google API Key (optional, can use GOOGLE_API_KEY env var)")
-#     args = parser.parse_args()
-# 
-#     print(f"Starting summarizer with URL: {args.url}")
-#     summarizer = None
-#     try:
-#         print("Initializing FastWebSummarizer...")
-#         summarizer = FastWebSummarizer(api_key=args.api_key)
-#         
-#         # Initialize state
-#         current_url = args.url
-#         summarizer.link_history = [current_url]  # Initialize with starting URL
-#         
-#         print("\nStarting interactive session (type 'exit' to quit)...")
-#         while True:
-#             # Get response from agent
-#             response, new_url = await agent_response(summarizer, current_url)
-#             
-#             # Print response for testing (in real backend this would be sent to frontend)
-#             print("\n" + "="*80)
-#             print(response["summary"])
-#             print("="*80 + "\n")
-#             
-#             # Get user input (in real backend this would come from websocket)
-#             user_input = input("Your response: ").strip()
-#             
-#             # Check for exit
-#             if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye', 'q', 'stop', 'end']:
-#                 print("\nEnding session...")
-#                 break
-#                 
-#             # Process user input
-#             response, new_url = await agent_response(summarizer, user_input)
-#             
-#             # Update URL if navigation occurred
-#             if new_url != current_url:
-#                 current_url = new_url
-#                 if current_url not in summarizer.link_history:
-#                     summarizer.link_history.append(current_url)
-#                 
-#     except KeyboardInterrupt:
-#         print("\n\nGot it, stopping now!")
-#     except Exception as e:
-#         print(f"\nError: {str(e)}")
-#         traceback.print_exc()
-#         sys.exit(1)
-#     finally:
-#         if summarizer:
-#             await summarizer.close()
-#             print("\nBrowser closed. Session ended.")
 
-async def test_find_website():
-    """Test the find_and_summarize_website function"""
-    try:
-        # Initialize summarizer
-        summarizer = FastWebSummarizer()
-        await summarizer.start_browser()
-        
-        # Test cases
-        test_prompts = [
-            "show me the uwaterloo website",
-            "show me the GenAI Genesis Hackathon official site",
-            "show me a site for origami",
-            "show me harvard's website",
-            "show me a site to buy fridges"
-        ]
-        
-        print("\nTesting find_and_summarize_website...")
-        for prompt in test_prompts:
-            print(f"\nPrompt: {prompt}")
-            print("="*80)
-            summary, url, onStartup = await find_website(prompt, summarizer)
-            print(f"Summary: {summary['summary']}")
-            print(f"URL: {url}")
-            print(f"OnStartup: {onStartup}")
-            print("="*80)
-            
-    except Exception as e:
-        print(f"Error during test: {e}")
-        traceback.print_exc()
-    finally:
-        if summarizer:
-            await summarizer.close()
 
 async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict, Optional[str], bool]:
     """Find and summarize a website from a natural language prompt.
@@ -616,7 +479,7 @@ async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict
 Find the most relevant and specific website URL that would help with this request. For example:
 - "find me a site to buy shoes" -> "https://www.nike.com"
 - "where can I find job listings" -> "https://www.linkedin.com/jobs"
-- "show me a website for learning programming" -> "https://www.codecademy.com"
+- "show me a website for learning programming" -> "https://www.freecodecamp.org"
 - "show me the uwaterloo website" -> "https://uwaterloo.ca"
 - "show me the GenAI Genesis official site" -> "https://genaigenesis.ca"
 
@@ -658,6 +521,75 @@ Return ONLY the URL, nothing else."""
             "summary": "Sorry, I encountered an error while searching for a website. Please try again."
         }, None, True
 
+
+async def test_combined_interaction():
+    """Test find_website followed by agent_response interaction"""
+    try:
+        # Initialize summarizer
+        summarizer = FastWebSummarizer()
+        await summarizer.start_browser()
+        
+        # Test cases - each is a tuple of (initial prompt, list of follow-up messages)
+        test_cases = [
+            (
+                "find me a site to learn programming",  # Initial prompt for find_website
+                [  # Follow-up messages for agent_response
+                    "what courses do you offer",
+                    "tell me about the python course",
+                    "what are the prerequisites",
+                    "go back to main page"
+                ]
+            ),
+            (
+                "show me uwaterloo's website",  # Initial prompt for find_website
+                [  # Follow-up messages for agent_response
+                    "tell me about admissions",
+                    "what programs are offered",
+                    "tell me about computer science",
+                    "go back"
+                ]
+            )
+        ]
+        
+        print("\nTesting combined find_website and agent_response interaction...")
+        
+        for initial_prompt, follow_ups in test_cases:
+            print(f"\n{'='*80}")
+            print(f"Initial prompt: {initial_prompt}")
+            print(f"{'='*80}")
+            
+            # First use find_website to get the URL
+            summary, url, onStartup = await find_website(initial_prompt, summarizer)
+            print(f"Found URL: {url}")
+            print(f"Initial Summary: {summary['summary']}")
+            print(f"OnStartup: {onStartup}")
+            
+            if not onStartup and url:  # If we found a valid site
+                print("\nStarting interaction with the site...")
+                
+                # First send the URL to initialize the session
+                summary, new_url = await agent_response(summarizer, url)
+                print(f"\nInitial page loaded:")
+                print(f"Summary: {summary['summary']}")
+                
+                # Then process follow-up messages
+                for message in follow_ups:
+                    print(f"\nUser message: {message}")
+                    print("-" * 40)
+                    summary, new_url = await agent_response(summarizer, message)
+                    print(f"Summary: {summary['summary']}")
+                    if new_url:
+                        print(f"New URL: {new_url}")
+            
+            print(f"\n{'='*80}\n")
+            
+    except Exception as e:
+        print(f"Error during test: {e}")
+        traceback.print_exc()
+    finally:
+        if summarizer:
+            await summarizer.close()
+
 if __name__ == "__main__":
     print("Script started")
-    asyncio.run(test_find_website())
+    asyncio.run(test_combined_interaction())
