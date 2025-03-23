@@ -571,7 +571,7 @@ async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[str,
         if not summary_dict or "summary" not in summary_dict:
             return "Could not generate summary", url, True
 
-        title_prompt = f"""Extract the MOST simple one to three word title based on this summary: {summary_dict['summary']}"""
+        title_prompt = f"""Extract the title of the webpage, like APple for apple.com by taking commonality of url and summary: {url} {summary_dict['summary']}"""
 
         title = summarizer.model.generate_content(title_prompt)
         summarizer.current_title = title.text.strip()
