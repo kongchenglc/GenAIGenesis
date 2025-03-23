@@ -50,7 +50,7 @@ class FastWebSummarizer:
         
         genai.configure(api_key=api_key)
         
-
+        
         
         # Use gemini-2.0-flash-lite for all operations
         self.model = genai.GenerativeModel('models/gemini-2.0-flash-lite')
@@ -516,6 +516,49 @@ async def main():
         if summarizer:
             await summarizer.close()
             print("\nBrowser closed. Session ended.")
+
+async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict, Optional[str], bool]:
+    """Find and summarize a website from a natural language prompt.
+    Returns: (summary_dict, url, onStartup)
+    - summary_dict: Contains the summary or error message
+    - url: The found URL or None
+    - onStartup: True if we need to keep searching, False if we found a valid site
+    """
+    try:
+        # Use Gemini to find a relevant website
+        url_prompt = f"""Given this user request: "{prompt}"
+
+Find a relevant website that would help with this request. For example:
+- "find me a site to find shoes" -> "https://www.zappos.com"
+- "where can I buy electronics" -> "https://www.bestbuy.com"
+- "I need a job" -> "https://www.linkedin.com"
+
+Return ONLY the URL, nothing else. If no relevant site can be determined, return "none"."""
+
+        response = summarizer.model.generate_content(url_prompt)
+        url = response.text.strip().strip('"').strip("'")
+        
+        # If no valid URL found, return error and True for onStartup
+        if url.lower() == "none" or not is_url(url):
+            return {
+                "summary": "I couldn't find a relevant website for your request. Could you please try again with more specific details?"
+            }, None, True
+            
+        # If we found a valid URL, try to summarize it
+        try:
+            summary, _ = await summarizer.quick_summarize(url)
+            return summary, url, False
+        except Exception as e:
+            print(f"Error during summarization: {e}")  # Add logging for debugging
+            return {
+                "summary": f"I found a website but couldn't access it: {url}. Please try a different request."
+            }, url, True
+            
+    except Exception as e:
+        print(f"Error during URL resolution: {e}")  # Add logging for debugging
+        return {
+            "summary": "Sorry, I encountered an error while searching for a website. Please try again."
+        }, None, True
 
 if __name__ == "__main__":
     print("Script started")

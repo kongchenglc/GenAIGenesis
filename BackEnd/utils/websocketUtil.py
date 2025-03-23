@@ -10,9 +10,10 @@ router = APIRouter()
 async def websocket_endpoint(websocket: WebSocket):
     isOnStartup = True
     await websocket.accept()
+    summarizer = None
+    current_url = None
+    
     try:
-        summarizer = FastWebSummarizer()
-        await summarizer.start_browser()
         while True:
             data = await websocket.receive_json()
             if isOnStartup:
@@ -83,9 +84,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_text("Error processing HTML.")         
     except WebSocketDisconnect:
         print("Client disconnected")
-        if summarizer:
-            await summarizer.close()
     except Exception as e:
-        print("Error: ", e)
+        print(f"Error in websocket endpoint: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "data": {"message": str(e)}
+        })
+    finally:
         if summarizer:
             await summarizer.close()
