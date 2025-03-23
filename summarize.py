@@ -419,6 +419,7 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
         else:
             # If not a URL, we're handling a command or query
 
+            
             new_url = summarizer.link_history[-1]
             summary, links = await summarizer.quick_summarize(new_url)
             current_summary = summary
@@ -507,6 +508,7 @@ Return ONLY the URL, nothing else."""
         try:
             # Use the existing quick_summarize method which is already working well
             summary, _ = await summarizer.quick_summarize(url)
+            summarizer.link_history.append(url)
             return summary, url, False
             
         except Exception as e:
