@@ -45,10 +45,10 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 
 | Component                        | Technology / Model                                          |
 | -------------------------------- | ----------------------------------------------------------- |
-| **AI Browser Agent**             | Gemini Model given external tools                           |
-| **Speech-to-Text (STT)**         | Web Speech API or Google Cloud Speech-to-Text               |
+| **Speech-to-Text (STT)**         | Web Speech API                                              |
 | **Text-to-Speech (TTS)**         | Web Speech Synthesis API                                    |
-| **Web Interaction & Navigation** | Playwright/Scrapybara                                       |
+| **AI Summarization**             | OpenAI GPT-4 or LLaMA for text processing                   |
+| **Web Interaction & Navigation** | Chrome Extensions API (Tabs, Scripting)                     |
 | **Visual Content Processing**    | Computer Vision models (for analyzing webpage images/icons) |
 
 ---
@@ -62,7 +62,6 @@ This Chrome extension is designed to help **blind or visually impaired users** n
 🚧 **Security & Privacy**: Protecting user data, especially **voice recordings and browsing history**.
 
 ---
-
 
 ## 🔹 Future Enhancements
 
