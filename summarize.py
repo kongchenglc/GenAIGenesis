@@ -57,6 +57,8 @@ class FastWebSummarizer:
         self.browser = None
         self.current_page = None
         self.link_history = []
+        self.current_title = None
+        self.bookmarks = {}
 
     async def start_browser(self):
         """Start a fast browser session"""
@@ -267,22 +269,24 @@ Return only the cleaned up text, nothing else."""
 
     def _build_quick_prompt(self, content: QuickPageContent) -> str:
         """Build a minimal prompt for fast processing"""
-        return f"""Quick webpage summary:
+        return f"""Given this webpage content:
 Title: {content.title}
 Main Headings: {' | '.join(content.main_headings)}
 Brief Content: {content.quick_summary[:300]}
 
-Provide a concise 1-2 sentence summary (no more than 50 words) focused on the specific content of this page."""
 
-    async def quick_summarize(self, url: str) -> Tuple[Dict, Dict[str, str]]:
+Provide a clear, concise 1-2 sentence summary of what this webpage is about. Focus on the main purpose and content. Do not ask for more information or make requests."""
+
+    async def quick_summarize(self, url: str) -> Tuple[str, Dict[str, str]]:
         """Fast summarization method"""
         try:
             content = await self.quick_extract(url)
             response = self.model.generate_content(self._build_quick_prompt(content))
-            return {"summary": response.text}, content.main_links
+            summary_text = response.text.strip()
+            return summary_text, content.main_links
         except Exception as e:
             console.print(f"[yellow]Warning: {str(e)}[/yellow]")
-            return {"summary": "Could not generate summary"}, {}
+            return "Could not generate summary", {}
 
     async def close(self):
         """Clean up resources"""
@@ -359,22 +363,26 @@ def agent_output(summary: Dict, nav_options):
 def _match_user_intent(user_input: str, available_options: Dict[str, str], model) -> Optional[str]:
     """Use LLM to match user input to available navigation options or information requests"""
     # First check if user wants to exit
-    if any(word in user_input.lower() for word in ['quit', 'exit', 'bye', 'goodbye', 'q', 'stop', 'end']):
+    if any(word in user_input.lower() for word in ['quit', 'exit', 'bye', 'goodbye', 'stop', 'end']):
         return 'EXIT'
     if any(word in user_input.lower() for word in ['back', 'previous']):
         return 'BACK'
-        
+
     # Use Gemini to classify the user's intent
     prompt = f"""Given this user input: "{user_input}"
 
 Classify the user's intent into one of these categories:
 1. INFO_REQUEST - if they want to learn more or get specific information about something
 2. NAVIGATION - if they want to navigate to a specific section
-3. NONE - if neither of the above
+3. BOOKMARK - if they want to save the current page as a bookmark
+4. LIST_BOOKMARKS - if they want to see their saved bookmarks
+5. GO_TO_BOOKMARK - if they want to navigate to a previously bookmarked page
+6. SWITCH_WEBSITE - if they want to go to a different website entirely
+7. NONE - if none of the above
 
 Available navigation options: {list(available_options.keys())}
 
-Return EXACTLY one of: INFO_REQUEST, NAVIGATION, or NONE"""
+Return EXACTLY one of: INFO_REQUEST, NAVIGATION, BOOKMARK, LIST_BOOKMARKS, GO_TO_BOOKMARK, SWITCH_WEBSITE, or NONE"""
 
     try:
         response = model.generate_content(prompt)
@@ -394,6 +402,8 @@ Only return the matching text or "none", nothing else."""
             nav_response = model.generate_content(nav_prompt)
             match = nav_response.text.strip().strip('"').strip("'")
             return match if match in available_options else None
+        elif intent in ['BOOKMARK', 'LIST_BOOKMARKS', 'GO_TO_BOOKMARK', 'SWITCH_WEBSITE']:
+            return intent
         else:
             return None
     except Exception:
@@ -418,47 +428,105 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
             current_nav_options = links
         else:
             # If not a URL, we're handling a command or query
-            new_url = summarizer.link_history[-1]
-            summary, links = await summarizer.quick_summarize(new_url)
-            current_summary = summary
-            current_nav_options = links
+            new_url = None
+            if summarizer.link_history:
+                new_url = summarizer.link_history[-1]
+            if new_url:
+                summary, links = await summarizer.quick_summarize(new_url)
+                current_summary = summary
+                current_nav_options = links
+            else:
+                current_summary = "No webpage loaded yet. Please provide a URL or search for a website."
+                current_nav_options = {}
+                
             matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
 
             if matched_option == 'EXIT':
-                current_summary["summary"] = "Alright, hope that was helpful!"
+                current_summary = "Alright, hope that was helpful!"
+            elif matched_option == 'BOOKMARK':
+                if not new_url:
+                    current_summary = "No page to bookmark!"
+                else:
+                    summarizer.bookmarks[summarizer.current_title] = new_url
+                    current_summary = "Bookmark saved!"
+            elif matched_option == 'LIST_BOOKMARKS':
+                if summarizer.bookmarks:
+                    current_summary = "Your bookmarks:\n" + "\n".join(f"- {title}: {url}" for title, url in summarizer.bookmarks.items())
+                else:
+                    current_summary = "You don't have any bookmarks yet."
+            elif matched_option == 'GO_TO_BOOKMARK':
+                # Extract bookmark title from user input
+                title_prompt = f"""If the user's input wants to go to a title that is in our bookmarks, return the title exactly as it is in our bookmark titles. If not, return none.
+                User input: {user_input} Our bookmark titles: {summarizer.bookmarks.keys()}"""
+                title = summarizer.model.generate_content(title_prompt)
+                
+                if title in summarizer.bookmarks:
+                    new_url = summarizer.bookmarks[title]
+                    current_summary = f"Taking you to bookmarked page called {title}..."
+                    summary, links = await summarizer.quick_summarize(new_url)
+                    current_summary = summary
+                    current_nav_options = links
+                else:
+                    current_summary = f"Couldn't find a bookmark for '{title}'"
+            elif matched_option == 'SWITCH_WEBSITE':
+                try:
+                    # Extract the website name from user input
+                    website_prompt = f"""Extract the website name from this request: {user_input}
+                    Return ONLY the website name, nothing else."""
+                    website_name = summarizer.model.generate_content(website_prompt).text.strip()
+                    print(f"Debug - SWITCH_WEBSITE extracted name: {website_name}")
+                    
+                    # Use find_website to get the new URL
+                    summary, new_url, on_startup = await find_website(website_name, summarizer)
+                    print(f"Debug - SWITCH_WEBSITE got summary: {summary}")
+                    print(f"Debug - SWITCH_WEBSITE got new_url: {new_url}")
+                    print(f"Debug - SWITCH_WEBSITE got on_startup: {on_startup}")
+                    
+                    if not on_startup and new_url:
+                        current_summary = summary
+                        # Get navigation links using quick_summarize
+                        _, current_nav_options = await summarizer.quick_summarize(new_url)
+                        summarizer.link_history.append(new_url)  # Add the new URL to history
+                        print(f"Debug - SWITCH_WEBSITE added to history: {new_url}")
+                    else:
+                        current_summary = f"Couldn't find a website for '{website_name}'"
+                except Exception as e:
+                    print(f"Error switching website: {str(e)}")
+                    current_summary = f"Sorry, I couldn't switch to that website. Please try again."
             elif matched_option == 'BACK':
                 if len(summarizer.link_history) > 1:
                     previous_url = summarizer.link_history[-2]
-                    current_summary["summary"] = "Going back to the previous page..."
+                    current_summary = "Going back to the previous page..."
                     new_url = previous_url
                     summary, links = await summarizer.quick_summarize(previous_url)
                     current_summary = summary
                     current_nav_options = links
                 else:
-                    current_summary["summary"] = "You're already on the first page!"
+                    current_summary = "You're already on the first page!"
             elif matched_option == 'INFO_REQUEST':
                 specific_info = await summarizer.get_specific_info(new_url, user_input)
-                current_summary = {
-                    "summary": f"Here's what I found:\n{specific_info}\n\n"
+                current_summary = (
+                    f"Here's what I found:\n{specific_info}\n\n"
                     "I can help you in two ways:\n"
                     f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
                     "2. Ask another question about this page"
-                }
+                )
             elif matched_option:
-                current_summary["summary"] = f"Taking you to {matched_option}..."
+                current_summary = f"Taking you to {matched_option}..."
                 new_url = current_nav_options[matched_option]
                 summarizer.link_history.append(new_url)
                 summary, links = await summarizer.quick_summarize(new_url)
                 current_summary = summary
                 current_nav_options = links
             else:
-                current_summary["summary"] = (
+                current_summary = (
                     "I'm not sure what you want to do. You can:\n"
                     f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
                     "2. Ask for specific information on this page"
                 )
 
         # Add navigation options to summary if they exist
+
         if current_nav_options and "summary" in current_summary:
             if not current_summary["summary"].endswith("page"):  # Avoid duplicate navigation options
                 # current_summary["summary"] += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
@@ -467,8 +535,7 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
                 sections = list(current_nav_options.keys())[:5]
                 current_summary["summary"] += f"\n\nSome sections: {' • '.join(sections)}{' • ' if len(current_nav_options) > 5 else ''}"
 
-
-        return current_summary, new_url
+        return {"summary": current_summary}, new_url
 
     except Exception as e:
         print(f"Error in agent_response: {e}")
@@ -476,30 +543,45 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
 
 
 
-async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict[str, Any], str, bool]:
+async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[str, str, bool]:
     """Find and summarize a website based on a user prompt."""
     try:
         # Use Gemini to find a relevant website
         gemini_prompt = f"""Find a relevant website URL for this prompt: {prompt}
         Return ONLY the URL, nothing else. The URL should be a direct link to the most relevant page.
-        If you can not find the URL return 'error!'"""
+        For example:
+        if I say go to samsung, you shoule return https://www.samsung.com
+        if I say go to the University of Waterloo main website, you should return https://www.uwaterloo.ca
+        """
         
         response = summarizer.model.generate_content(gemini_prompt)
         url = response.text.strip()
-        
-        # Validate URL
+        print(f"Debug - find_website got URL: {url}")
+
         if not is_url(url):
-            print('Error in find_website')
-            return {"summary": "Error"}, "", True
+            print("Error couldn't find a valid site")
+            return "Could not find a valid website", "", True
+
             
         # Use agent_response to get the initial summary
-        summary, new_url = await agent_response(summarizer, url)
+        summary_dict, new_url = await agent_response(summarizer, url)
+        print(f"Debug - find_website got summary: {summary_dict}")
+        print(f"Debug - find_website got new_url: {new_url}")
+
+        if not summary_dict or "summary" not in summary_dict:
+            return "Could not generate summary", url, True
+
+        title_prompt = f"""Extract the MOST simple one to three word title based on this summary: {summary_dict['summary']}"""
+
+        title = summarizer.model.generate_content(title_prompt)
+        summarizer.current_title = title.text.strip()
+        print(f"Debug - find_website set title: {summarizer.current_title}")
         
-        return summary, new_url, False
+        return summary_dict["summary"], new_url, False
         
     except Exception as e:
         print(f"Error in find_website: {str(e)}")
-        return {"summary": f"Error: {str(e)}"}, "", True
+        return f"Error: {str(e)}", "", True
 
 
 async def test_combined_interaction():
@@ -541,7 +623,7 @@ async def test_combined_interaction():
             # First use find_website to get the URL
             summary, url, onStartup = await find_website(initial_prompt, summarizer)
             print(f"Found URL: {url}")
-            print(f"Initial Summary: {summary['summary']}")
+            print(f"Initial Summary: {summary}")
             print(f"OnStartup: {onStartup}")
             
             if not onStartup and url:  # If we found a valid site
@@ -550,14 +632,14 @@ async def test_combined_interaction():
                 # First send the URL to initialize the session
                 summary, new_url = await agent_response(summarizer, url)
                 print(f"\nInitial page loaded:")
-                print(f"Summary: {summary['summary']}")
+                print(f"Summary: {summary}")
                 
                 # Then process follow-up messages
                 for message in follow_ups:
                     print(f"\nUser message: {message}")
                     print("-" * 40)
                     summary, new_url = await agent_response(summarizer, message)
-                    print(f"Summary: {summary['summary']}")
+                    print(f"Summary: {summary}")
                     if new_url:
                         print(f"New URL: {new_url}")
             
