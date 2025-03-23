@@ -466,62 +466,28 @@ async def agent_response(summarizer: FastWebSummarizer, user_input: str):
 
 
 
-async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict, Optional[str], bool]:
-    """Find and summarize a website from a natural language prompt.
-    Returns: (summary_dict, url, onStartup)
-    - summary_dict: Contains the summary or error message
-    - url: The found URL or None
-    - onStartup: True if we need to keep searching, False if we found a valid site
-    """
+async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict[str, Any], str, bool]:
+    """Find and summarize a website based on a user prompt."""
     try:
-        # Use Gemini to find a relevant website with more specific examples
-        url_prompt = f"""Given this user request: "{prompt}"
-
-Find the most relevant and specific website URL that would help with this request. For example:
-- "find me a site to buy shoes" -> "https://www.nike.com"
-- "where can I find job listings" -> "https://www.linkedin.com/jobs"
-- "show me a website for learning programming" -> "https://www.freecodecamp.org"
-- "show me the uwaterloo website" -> "https://uwaterloo.ca"
-- "show me the GenAI Genesis official site" -> "https://genaigenesis.ca"
-
-Important rules:
-1. Return ONLY the URL, nothing else
-2. Just return the most specific and relevant URL (e.g., /jobs for job sites)
-3. For universities, use the main domain
-4. For hackathons/events, use the official event URL
-5. If no relevant site can be determined, return "none"
-6. Never return blocked or inaccessible sites
-7. For shopping, prefer specialized retailers over general marketplaces
-
-Return ONLY the URL, nothing else."""
-
-        response = summarizer.model.generate_content(url_prompt)
-        url = response.text.strip().strip('"').strip("'")
+        # Use Gemini to find a relevant website
+        gemini_prompt = f"""Find a relevant website URL for this prompt: {prompt}
+        Return ONLY the URL, nothing else. The URL should be a direct link to the most relevant page."""
         
-        # If no valid URL found, return error and True for onStartup
-        if url.lower() == "none" or not is_url(url):
-            return {
-                "summary": "I couldn't find a relevant website for your request. Could you please try again with more specific details?"
-            }, None, True
+        response = summarizer.model.generate_content(gemini_prompt)
+        url = response.text.strip()
+        
+        # Validate URL
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
             
-        # If we found a valid URL, try to summarize it
-        try:
-            # Use the existing quick_summarize method which is already working well
-            summary, _ = await summarizer.quick_summarize(url)
-            summarizer.link_history.append(url)
-            return summary, url, False
-            
-        except Exception as e:
-            print(f"Error during summarization: {e}")  # Add logging for debugging
-            return {
-                "summary": f"I found a website but couldn't access it: {url}. Please try a different request."
-            }, url, True
-            
+        # Use agent_response to get the initial summary
+        summary, new_url = await agent_response(summarizer, url)
+        
+        return summary, new_url, False
+        
     except Exception as e:
-        print(f"Error during URL resolution: {e}")  # Add logging for debugging
-        return {
-            "summary": "Sorry, I encountered an error while searching for a website. Please try again."
-        }, None, True
+        print(f"Error in find_website: {str(e)}")
+        return {"summary": f"Error: {str(e)}"}, "", True
 
 
 async def test_combined_interaction():
@@ -534,10 +500,10 @@ async def test_combined_interaction():
         # Test cases - each is a tuple of (initial prompt, list of follow-up messages)
         test_cases = [
             (
-                "find me a site to learn programming",  # Initial prompt for find_website
+                "find me a site to learn cooking",  # Initial prompt for find_website
                 [  # Follow-up messages for agent_response
                     "what courses do you offer",
-                    "tell me about the python course",
+                    "tell me about a nice course",
                     "what are the prerequisites",
                     "go back to main page"
                 ]
