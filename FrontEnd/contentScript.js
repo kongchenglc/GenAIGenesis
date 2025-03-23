@@ -118,6 +118,12 @@ class VoiceAssistant {
                 // Other message types...
             });
 
+            if (window.SpeechRecognition || window.webkitSpeechRecognition) {
+                console.log("Speech recognition is supported");
+            } else {
+                console.log("Speech recognition is NOT supported");
+            }
+
         } catch (error) {
             console.error("Error initializing voice assistant:", error);
         }
@@ -385,7 +391,7 @@ class VoiceAssistant {
         this.ui.assistantContainer.style.height = '60px';
 
         // Keep dialog open if in conversation mode
-        if (!this.state.inConversationMode) {
+        if (!this.state.inConversationMode && this.ui.dialogContainer) {
             this.ui.dialogContainer.style.display = 'none';
         }
 
@@ -397,9 +403,31 @@ class VoiceAssistant {
      * Handle WebSocket messages from the backend
      */
     handleWebSocketMessage(data) {
+        // Handle error messages first
+        if (data && data.type === 'error') {
+            console.error('WebSocket error from server:', data.data?.message);
+            this.updateFeedbackText("Backend error: " + (data.data?.message || "Unknown error"), true);
+
+            // If there's a specific instruction in the error message, extract and display it
+            const errorMsg = data.data?.message || '';
+            if (errorMsg.includes('playwright install')) {
+                this.speak("Backend requires Playwright installation. Please run playwright install command.");
+            } else {
+                this.speak("There was an error with the assistant backend.");
+            }
+            return;
+        }
+
         // Process summary and options
         if (data.summary) {
             console.log('Received summary:', data.summary);
+
+            // Extract the actual summary text - handle both formats
+            const summaryText = typeof data.summary === 'object' && data.summary.summary
+                ? data.summary.summary
+                : typeof data.summary === 'string'
+                    ? data.summary
+                    : "No readable summary available";
 
             // Store navigation options for potential future use
             if (data.options && typeof data.options === 'object') {
@@ -417,13 +445,17 @@ class VoiceAssistant {
             // Mark page as analyzed
             this.state.pageAnalyzed = true;
 
-            // Speak the summary
-            this.speak(data.summary);
+            // Speak the summary text
+            this.speak(summaryText);
+            this.updateFeedbackText(summaryText, true);
 
         } else if (typeof data === 'string') {
             // Log and speak the message
             console.log('Received text message:', data);
             this.speak(data);
+        }
+        if (data.url) {
+            window.open(data.url, "_blank");
         }
     }
 
@@ -563,32 +595,102 @@ class VoiceAssistant {
         try {
             this.updateFeedbackText("Processing...", true);
 
-            // Send audio to background script
-            const response = await chrome.runtime.sendMessage({
-                type: "SEND_AUDIO",
-                audioData: audioBlob,
-                isActivated: this.state.isActivated
+            // Create a URL for the audio blob
+            const audioUrl = URL.createObjectURL(audioBlob);
+
+            // Use Web Speech API for recognition
+            const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = 'en-US';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+
+            // Create a promise to handle the recognition result
+            const recognitionPromise = new Promise((resolve, reject) => {
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    console.log('Transcription result:', transcript);
+                    resolve(transcript);
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('Speech recognition error:', event.error);
+                    reject(new Error(`Speech recognition error: ${event.error}`));
+                };
+
+                // Play the audio to recognize it
+                const audio = new Audio(audioUrl);
+                audio.volume = 0; // Mute the audio to prevent echo
+                audio.oncanplaythrough = () => {
+                    audio.play().catch(e => console.error('Error playing audio:', e));
+                    recognition.start();
+                };
+
+                audio.onerror = (e) => {
+                    console.error('Error loading audio:', e);
+                    reject(new Error('Error loading audio'));
+                };
             });
 
-            if (response.error) {
-                throw new Error(response.error);
-            }
+            // Wait for speech recognition to complete
+            try {
+                const transcript = await recognitionPromise;
 
-            if (response.command) {
-                this.handleCommand(response.command);
-            } else if (response.transcription) {
-                // Check if in conversation mode for special handling
-                if (this.state.inConversationMode) {
-                    this.processUserCommand(response.transcription);
+                // Check for wake words if not already activated
+                if (!this.state.isActivated) {
+                    const wakeWords = ["hey assistant", "hello assistant"];
+                    const lowerTranscript = transcript.toLowerCase();
+
+                    for (const wakeWord of wakeWords) {
+                        if (lowerTranscript.includes(wakeWord)) {
+                            this.activate();
+                            return;
+                        }
+                    }
+
+                    // Check for stop words
+                    const stopWords = ["goodbye assistant", "bye assistant"];
+                    for (const stopWord of stopWords) {
+                        if (lowerTranscript.includes(stopWord)) {
+                            this.deactivate();
+                            return;
+                        }
+                    }
+                }
+
+                // Update the UI with the transcript
+                this.updateFeedbackText(transcript, true);
+
+                // Send the transcribed text to the websocket if connected
+                if (this.websocket.isConnected &&
+                    this.websocket.connection &&
+                    this.websocket.connection.readyState === WebSocket.OPEN) {
+
+                    const data = { text: transcript };
+                    console.log('Sending voice transcription to WebSocket:', data);
+                    this.websocket.connection.send(JSON.stringify(data));
                 } else {
-                    this.updateFeedbackText(response.transcription, true);
+                    console.warn('WebSocket not connected. Cannot send transcription.');
+                    // Try to reconnect
+                    this.connectWebSocket();
+                }
+
+                // Continue recording if still activated
+                if (this.state.isActivated) {
+                    this.startRecording();
+                }
+
+            } catch (error) {
+                console.error("Speech recognition failed:", error);
+                this.updateFeedbackText("Could not recognize speech.", true);
+
+                // Continue recording if still activated
+                if (this.state.isActivated) {
+                    this.startRecording();
                 }
             }
 
-            // If still activated, start recording again
-            if (this.state.isActivated) {
-                this.startRecording();
-            }
+            // Clean up the URL object
+            URL.revokeObjectURL(audioUrl);
 
         } catch (error) {
             console.error("Error processing audio:", error);
@@ -778,12 +880,12 @@ class VoiceAssistant {
                 try {
                     // Parse response
                     let response;
-                    
+
                     // Make sure event.data is not undefined before parsing
                     if (event.data) {
                         response = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
                         console.log('Parsed WebSocket response:', response);
-                        
+
                         // Check if response is properly defined before handling it
                         if (response) {
                             this.handleWebSocketMessage(response);
