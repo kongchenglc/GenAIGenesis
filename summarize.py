@@ -11,7 +11,7 @@ import asyncio
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 import argparse
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from dotenv import load_dotenv
 import traceback
 
@@ -50,21 +50,27 @@ class FastWebSummarizer:
         
         genai.configure(api_key=api_key)
         
-
-        
         # Use gemini-2.0-flash-lite for all operations
         self.model = genai.GenerativeModel('models/gemini-2.0-flash-lite')
         self.browser = None
         self.current_page = None
+        self.link_history = []
+        # Add cache for quick lookups
+        self.url_cache = {}  # url -> (summary, links) mapping
+        self._browser_started = False
 
     async def start_browser(self):
         """Start a fast browser session"""
+        if self._browser_started:
+            return
+            
         p = await async_playwright().start()
         self.browser = await p.chromium.launch(
             headless=True,
-            args=['--disable-javascript']  # Disable JS for faster loading
+            args=['--disable-javascript', '--disable-gpu', '--no-sandbox']  # Additional optimizations
         )
         self.current_page = await self.browser.new_page()
+        self._browser_started = True
 
     async def _safe_extract(self, coro: Any, timeout: float, default: Any = None) -> Any:
         """Safely extract content with timeout"""
@@ -177,81 +183,28 @@ Return only the cleaned up text, nothing else."""
             if not self.current_page:
                 await self.start_browser()
 
-            # Load page
-            await self._safe_extract(
-                self.current_page.goto(url, wait_until="domcontentloaded"),
-                PAGE_LOAD_TIMEOUT
-            )
-
-            # Get title
-            title = await self._safe_extract(
+            # Extract all content in parallel
+            title_task = self._safe_extract(
                 self.current_page.title(),
                 CONTENT_TIMEOUT,
                 "Unknown Title"
             )
-
-            # Extract navigation links
-            main_links = {}
-            nav_selectors = ['nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]']
-            for selector in nav_selectors:
-                async def extract_link(element):
-                    text = await element.text_content()
-                    href = await element.get_attribute('href')
-                    return (text.strip(), href) if text and href and len(text.strip()) < 50 else None
-
-                links = await self._extract_elements(selector, extract_link)
-                for text, href in links[:MAX_LINKS]:
-                    if text and href:
-                        main_links[text] = urljoin(url, href)
-
-            # Extract headings
-            async def extract_heading(element):
-                text = await element.text_content()
-                return text.strip() if text and text.strip() else None
-
-            main_headings = await self._extract_elements('h1, h2', extract_heading)
-            main_headings = main_headings[:MAX_HEADINGS]
-
-            # Extract content
-            content_selectors = [
-                'main', 'article', '#content', '.content',
-                '[role="main"]', '.main-content', '#main-content',
-                'section:first-of-type', '.page-content',
-                '[data-testid="content"]'
-            ]
             
-            quick_summary = ""
-            for selector in content_selectors:
-                if element := await self.current_page.query_selector(selector):
-                    text = await self._safe_extract(
-                        self.current_page.evaluate("""
-                            (el) => {
-                                const clone = el.cloneNode(true);
-                                const nav = clone.querySelector('nav, header, footer');
-                                if (nav) nav.remove();
-                                return clone.textContent;
-                            }
-                        """, element),
-                        CONTENT_TIMEOUT
-                    )
-                    if text and len(text.strip()) > MIN_CONTENT_LENGTH:
-                        quick_summary = text.strip()[:MAX_SUMMARY_LENGTH]
-                        break
-
-            # Fallback to paragraphs if no content found
-            if not quick_summary:
-                async def extract_paragraph(element):
-                    text = await element.text_content()
-                    return text.strip() if text and len(text.strip()) > MIN_CONTENT_LENGTH else None
-
-                paragraphs = await self._extract_elements('p', extract_paragraph)
-                quick_summary = ' '.join(paragraphs[:3])[:MAX_SUMMARY_LENGTH]
+            # Extract links and headings in parallel
+            links_task = self._extract_links()
+            headings_task = self._extract_headings()
+            content_task = self._extract_main_content()
+            
+            # Wait for all extractions
+            title, links, headings, content = await asyncio.gather(
+                title_task, links_task, headings_task, content_task
+            )
 
             return QuickPageContent(
                 title=title,
-                main_links=main_links,
-                main_headings=main_headings,
-                quick_summary=quick_summary
+                main_links=links,
+                main_headings=headings,
+                quick_summary=content
             )
 
         except Exception as e:
@@ -262,7 +215,87 @@ Return only the cleaned up text, nothing else."""
                 main_headings=[],
                 quick_summary=""
             )
-    
+
+    async def _extract_links(self) -> Dict[str, str]:
+        """Extract navigation links in parallel"""
+        main_links = {}
+        nav_selectors = ['nav a[href]', 'header a[href]', '#nav-main a[href]', '.nav-links a[href]']
+        
+        async def extract_link(element):
+            text = await element.text_content()
+            href = await element.get_attribute('href')
+            return (text.strip(), href) if text and href and len(text.strip()) < 50 else None
+
+        # Extract links from all selectors in parallel
+        link_tasks = []
+        for selector in nav_selectors:
+            elements = await self.current_page.query_selector_all(selector)
+            for element in elements[:MAX_LINKS]:
+                link_tasks.append(self._safe_extract(extract_link(element), ELEMENT_TIMEOUT))
+
+        results = await asyncio.gather(*link_tasks)
+        for text, href in results:
+            if text and href:
+                main_links[text] = urljoin(self.current_page.url, href)
+
+        return main_links
+
+    async def _extract_headings(self) -> List[str]:
+        """Extract headings in parallel"""
+        async def extract_heading(element):
+            text = await element.text_content()
+            return text.strip() if text and text.strip() else None
+
+        elements = await self.current_page.query_selector_all('h1, h2')
+        heading_tasks = [self._safe_extract(extract_heading(element), ELEMENT_TIMEOUT) 
+                        for element in elements[:MAX_HEADINGS]]
+        
+        results = await asyncio.gather(*heading_tasks)
+        return [h for h in results if h]
+
+    async def _extract_main_content(self) -> str:
+        """Extract main content in parallel"""
+        content_selectors = [
+            'main', 'article', '#content', '.content',
+            '[role="main"]', '.main-content', '#main-content',
+            'section:first-of-type', '.page-content',
+            '[data-testid="content"]'
+        ]
+        
+        # Try all selectors in parallel
+        selector_tasks = []
+        for selector in content_selectors:
+            if element := await self.current_page.query_selector(selector):
+                selector_tasks.append(
+                    self._safe_extract(
+                        self.current_page.evaluate("""
+                            (el) => {
+                                const clone = el.cloneNode(true);
+                                const nav = clone.querySelector('nav, header, footer');
+                                if (nav) nav.remove();
+                                return clone.textContent;
+                            }
+                        """, element),
+                        CONTENT_TIMEOUT
+                    )
+                )
+
+        results = await asyncio.gather(*selector_tasks)
+        for text in results:
+            if text and len(text.strip()) > MIN_CONTENT_LENGTH:
+                return text.strip()[:MAX_SUMMARY_LENGTH]
+
+        # Fallback to paragraphs if no content found
+        async def extract_paragraph(element):
+            text = await element.text_content()
+            return text.strip() if text and len(text.strip()) > MIN_CONTENT_LENGTH else None
+
+        elements = await self.current_page.query_selector_all('p')
+        paragraph_tasks = [self._safe_extract(extract_paragraph(element), ELEMENT_TIMEOUT) 
+                          for element in elements[:3]]
+        
+        paragraphs = await asyncio.gather(*paragraph_tasks)
+        return ' '.join(p for p in paragraphs if p)[:MAX_SUMMARY_LENGTH]
 
     def _build_quick_prompt(self, content: QuickPageContent) -> str:
         """Build a minimal prompt for fast processing"""
@@ -274,11 +307,37 @@ Brief Content: {content.quick_summary[:300]}
 Provide a 1-2 sentence summary focused on the specific content of this page."""
 
     async def quick_summarize(self, url: str) -> Tuple[Dict, Dict[str, str]]:
-        """Fast summarization method"""
+        """Fast summarization method with caching"""
         try:
-            content = await self.quick_extract(url)
+            # Check cache first
+            if url in self.url_cache:
+                return self.url_cache[url]
+
+            if not self.current_page:
+                await self.start_browser()
+
+            # Start page load and content extraction in parallel
+            page_load = self._safe_extract(
+                self.current_page.goto(url, wait_until="domcontentloaded"),
+                PAGE_LOAD_TIMEOUT
+            )
+            
+            # Extract content while page is loading
+            content_task = asyncio.create_task(self.quick_extract(url))
+            
+            # Wait for both operations
+            await asyncio.gather(page_load, content_task)
+            content = content_task.result()
+            
+            # Generate summary
             response = self.model.generate_content(self._build_quick_prompt(content))
-            return {"summary": response.text}, content.main_links
+            
+            result = {"summary": response.text}, content.main_links
+            
+            # Cache the result
+            self.url_cache[url] = result
+            return result
+            
         except Exception as e:
             console.print(f"[yellow]Warning: {str(e)}[/yellow]")
             return {"summary": "Could not generate summary"}, {}
@@ -289,43 +348,39 @@ Provide a 1-2 sentence summary focused on the specific content of this page."""
             await self.browser.close()
 
 
-def display_quick_summary(summary: Dict, links: Dict[str, str]):
-    """Display a conversational summary and navigation options"""
-    # Clear any previous output for cleaner display
-    print("\n" + "="*80 + "\n")
-    
-    # Show the summary naturally
-    print(f"{summary['summary']}\n")
+def format_summary(summary: Dict, links: Dict[str, str]) -> Tuple[Dict, Dict[str, str]]:
+    """Format summary and navigation options into a response"""
+    # Format the response text
+    response_text = f"{summary['summary']}\n"
     
     if not links:
-        print("I don't see any navigation options on this page.")
-        return
+        response_text += "\nI don't see any navigation options on this page."
+    else:
+        # Clean up navigation options
+        nav_options = {}  # text -> url mapping
         
-    # Clean up navigation options
-    nav_options = {}  # text -> url mapping
-    
-    for text, url in links.items():
-        # Clean up the text
-        text = text.strip().replace('\n', ' ').replace('  ', ' ')
-        
-        # Skip very short or duplicate-looking links
-        if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
-            continue
+        for text, url in links.items():
+            # Clean up the text
+            text = text.strip().replace('\n', ' ').replace('  ', ' ')
             
-        nav_options[text] = url
+            # Skip very short or duplicate-looking links
+            if len(text) < 2 or text.lower() in ['en', 'fr', '.com', '.ca']:
+                continue
+                
+            nav_options[text] = url
+            
+            # Keep list manageable
+            if len(nav_options) >= 7:
+                break
         
-        # Keep list manageable
-        if len(nav_options) >= 7:
-            break
-    
-    if nav_options:
-        print("I can help you in two ways:")
-        print("1. Navigate to a section: " + ", ".join(nav_options.keys()))
-        print("2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')")
-    
-    print("\nJust tell me what you'd like to do!")
+        if nav_options:
+            response_text += "\nI can help you either "
+            response_text += "navigate to a section: " + ", ".join(nav_options.keys())
+            response_text += ", or help you get specific information on the page."
+        
+        response_text += "\n\nJust tell me what you'd like to do or know!"
 
-    return summary, nav_options
+    return {"summary": response_text}, nav_options
 
 
 def generate_nav_options(links: Dict[str, str]):
@@ -347,7 +402,7 @@ def generate_nav_options(links: Dict[str, str]):
     
     return nav_options
 
-def agent_response(summary: Dict, nav_options):
+def agent_output(summary: Dict, nav_options):
     text_response = summary['summary'] 
 
     if nav_options:
@@ -402,80 +457,200 @@ Only return the matching text or "none", nothing else."""
     except Exception:
         return None
 
-async def url_to_print(summarizer: FastWebSummarizer, initial_url: str):
-    current_url = initial_url
+def is_url(string):
+    parsed = urlparse(string)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+async def agent_response(summarizer: FastWebSummarizer, user_input: str):
+    new_url = None
     current_summary = None
-    current_nav_options = None
+    current_nav_options = {}
 
-    while True:
-        if not current_summary:  # Only get new summary if we don't have one
-            summary, links = await summarizer.quick_summarize(current_url)
-            current_summary, current_nav_options = display_quick_summary(summary, links)
-        
-        if not current_nav_options:
-            print("\nLooks like we've reached a page without any navigation options.")
-            
-        user_input = input().strip()
-        matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
-        
-        if matched_option == 'EXIT':
-            print("\nAlright, hope that was helpful!")
-            break
-        elif matched_option == 'BACK':
-            print("\nGoing back to the previous page...")
-            current_summary = None  # Reset summary for next pag
-            break
-        elif matched_option == 'INFO_REQUEST':
-            print("\nLet me search for that information...")
-            specific_info = await summarizer.get_specific_info(current_url, user_input)
-            # Replace the current summary with the specific information
-            current_summary = {"summary": specific_info}
-            print("\n" + "="*80 + "\n")
-            print(f"{specific_info}\n")
-            print("I can help you in two ways:")
-            print("1. Navigate to a section: " + ", ".join(current_nav_options.keys()))
-            print("2. Get specific information: Just ask about what you want to know (e.g., 'Tell me about pricing' or 'What are the team members?')")
-            print("\nJust tell me what you'd like to do!")
-        elif matched_option:
-            print(f"\nTaking you to {matched_option}...")
-            current_url = current_nav_options[matched_option]
-            current_summary = None  # Reset summary for next page
-        else:
-            print("\nI'm not sure what you want to do. You can:")
-            print("1. Navigate to a section:", ", ".join(current_nav_options.keys()))
-            print("2. Ask for specific information (e.g., 'Tell me about pricing')")
-            
-    await summarizer.close()
-
-async def main():
-    parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
-    parser.add_argument("url", help="URL of the webpage to summarize")
-    parser.add_argument("--api-key", help="Google API Key (optional, can use GOOGLE_API_KEY env var)")
-    args = parser.parse_args()
-
-    print(f"Starting summarizer with URL: {args.url}")
-    summarizer = None
     try:
-        print("Initializing FastWebSummarizer...")
-        summarizer = FastWebSummarizer(api_key=args.api_key)
-        print("Getting summary and links...")
-        summary, links = await summarizer.quick_summarize(args.url)
-        print("Generating navigation options...")
-        nav_options = generate_nav_options(links)
-        print("Generating agent response...")
-        text_response, nav_options = agent_response(summary, nav_options)
-        print("Starting interactive session...")
-        await url_to_print(summarizer, args.url)
-    except KeyboardInterrupt:
-        print("\n\nGot it, stopping now!")
+        # First handle URL input
+        if is_url(user_input):
+            new_url = user_input
+            summarizer.link_history.append(new_url)  # Append URL directly, not in a list
+            summary, links = await summarizer.quick_summarize(new_url)
+            current_summary = summary
+            current_nav_options = links
+        else:
+            # If not a URL, we're handling a command or query
+
+            new_url = summarizer.link_history[-1]
+            summary, links = await summarizer.quick_summarize(new_url)
+            current_summary = summary
+            current_nav_options = links
+            matched_option = _match_user_intent(user_input, current_nav_options, summarizer.model)
+
+            if matched_option == 'EXIT':
+                current_summary["summary"] = "Alright, hope that was helpful!"
+            elif matched_option == 'BACK':
+                if len(summarizer.link_history) > 1:  # Use len() instead of .length
+                    current_summary["summary"] = "Going back to the previous page..."
+                    new_url = summarizer.link_history[-2]
+                else:
+                    current_summary["summary"] = "You're already on the first page!"
+            elif matched_option == 'INFO_REQUEST':
+                specific_info = await summarizer.get_specific_info(new_url, user_input)
+                current_summary = {
+                    "summary": f"Here's what I found:\n{specific_info}\n\n"
+                    "I can help you in two ways:\n"
+                    f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
+                    "2. Ask another question about this page"
+                }
+            elif matched_option:
+                current_summary["summary"] = f"Taking you to {matched_option}..."
+                new_url = current_nav_options[matched_option]
+                summarizer.link_history.append(new_url)
+            else:
+                current_summary["summary"] = (
+                    "I'm not sure what you want to do. You can:\n"
+                    f"1. Navigate to a section: {', '.join(current_nav_options.keys())}\n"
+                    "2. Ask for specific information on this page"
+                )
+
+        # Add navigation options to summary if they exist
+        if current_nav_options and "summary" in current_summary:
+            if not current_summary["summary"].endswith("page"):  # Avoid duplicate navigation options
+                current_summary["summary"] += f"\n\nAvailable sections: {', '.join(current_nav_options.keys())}"
+
+        return current_summary, new_url
+
     except Exception as e:
-        print(f"\nError: {str(e)}")
+        print(f"Error in agent_response: {e}")
+        return {"summary": "Sorry, I encountered an error processing your request."}, None
+
+# async def main():
+#     parser = argparse.ArgumentParser(description="Fast webpage summarizer for accessibility")
+#     parser.add_argument("url", help="URL of the webpage to summarize")
+#     parser.add_argument("--api-key", help="Google API Key (optional, can use GOOGLE_API_KEY env var)")
+#     args = parser.parse_args()
+# 
+#     print(f"Starting summarizer with URL: {args.url}")
+#     summarizer = None
+#     try:
+#         print("Initializing FastWebSummarizer...")
+#         summarizer = FastWebSummarizer(api_key=args.api_key)
+#         
+#         # Initialize state
+#         current_url = args.url
+#         summarizer.link_history = [current_url]  # Initialize with starting URL
+#         
+#         print("\nStarting interactive session (type 'exit' to quit)...")
+#         while True:
+#             # Get response from agent
+#             response, new_url = await agent_response(summarizer, current_url)
+#             
+#             # Print response for testing (in real backend this would be sent to frontend)
+#             print("\n" + "="*80)
+#             print(response["summary"])
+#             print("="*80 + "\n")
+#             
+#             # Get user input (in real backend this would come from websocket)
+#             user_input = input("Your response: ").strip()
+#             
+#             # Check for exit
+#             if user_input.lower() in ['exit', 'quit', 'bye', 'goodbye', 'q', 'stop', 'end']:
+#                 print("\nEnding session...")
+#                 break
+#                 
+#             # Process user input
+#             response, new_url = await agent_response(summarizer, user_input)
+#             
+#             # Update URL if navigation occurred
+#             if new_url != current_url:
+#                 current_url = new_url
+#                 if current_url not in summarizer.link_history:
+#                     summarizer.link_history.append(current_url)
+#                 
+#     except KeyboardInterrupt:
+#         print("\n\nGot it, stopping now!")
+#     except Exception as e:
+#         print(f"\nError: {str(e)}")
+#         traceback.print_exc()
+#         sys.exit(1)
+#     finally:
+#         if summarizer:
+#             await summarizer.close()
+#             print("\nBrowser closed. Session ended.")
+
+async def test_find_website():
+    """Test the find_and_summarize_website function"""
+    try:
+        # Initialize summarizer
+        summarizer = FastWebSummarizer()
+        await summarizer.start_browser()
+        
+        # Test cases
+        test_prompts = [
+            "find me a site to buy shoes",
+            "where can I find job listings",
+            "show me a website for learning programming",
+            "show me the uwaterloo website",
+            "show me the GenAI Genesis Hackathon official site"
+        ]
+        
+        print("\nTesting find_and_summarize_website...")
+        for prompt in test_prompts:
+            print(f"\nPrompt: {prompt}")
+            print("="*80)
+            summary, url, onStartup = await find_website(prompt, summarizer)
+            print(f"Summary: {summary['summary']}")
+            print(f"URL: {url}")
+            print(f"OnStartup: {onStartup}")
+            print("="*80)
+            
+    except Exception as e:
+        print(f"Error during test: {e}")
         traceback.print_exc()
-        sys.exit(1)
     finally:
         if summarizer:
             await summarizer.close()
 
+async def find_website(prompt: str, summarizer: FastWebSummarizer) -> Tuple[Dict, Optional[str], bool]:
+    """Find and summarize a website from a natural language prompt.
+    Returns: (summary_dict, url, onStartup)
+    - summary_dict: Contains the summary or error message
+    - url: The found URL or None
+    - onStartup: True if we need to keep searching, False if we found a valid site
+    """
+    try:
+        # Use Gemini to find a relevant website
+        url_prompt = f"""Given this user request: "{prompt}"
+
+Find a relevant website that would help with this request. For example:
+- "find me a site to find shoes" -> "https://www.zappos.com"
+- "where can I buy electronics" -> "https://www.bestbuy.com"
+- "I need a job" -> "https://www.linkedin.com"
+
+Return ONLY the URL, nothing else. If no relevant site can be determined, return "none"."""
+
+        response = summarizer.model.generate_content(url_prompt)
+        url = response.text.strip().strip('"').strip("'")
+        
+        # If no valid URL found, return error and True for onStartup
+        if url.lower() == "none" or not is_url(url):
+            return {
+                "summary": "I couldn't find a relevant website for your request. Could you please try again with more specific details?"
+            }, None, True
+            
+        # If we found a valid URL, try to summarize it
+        try:
+            summary, _ = await summarizer.quick_summarize(url)
+            return summary, url, False
+        except Exception as e:
+            print(f"Error during summarization: {e}")  # Add logging for debugging
+            return {
+                "summary": f"I found a website but couldn't access it: {url}. Please try a different request."
+            }, url, True
+            
+    except Exception as e:
+        print(f"Error during URL resolution: {e}")  # Add logging for debugging
+        return {
+            "summary": "Sorry, I encountered an error while searching for a website. Please try again."
+        }, None, True
+
 if __name__ == "__main__":
     print("Script started")
-    asyncio.run(main())
+    asyncio.run(test_find_website())
